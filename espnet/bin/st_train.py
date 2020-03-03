@@ -12,16 +12,12 @@ import random
 import subprocess
 import sys
 
-from distutils.version import LooseVersion
-
 import configargparse
 import numpy as np
 import torch
 
-from espnet.utils.cli_utils import strtobool
+from espnet.utils.cli_utils import strtobool, count_gpus
 from espnet.utils.training.batchfy import BATCH_COUNT_CHOICES
-
-is_torch_1_2_plus = LooseVersion(torch.__version__) >= LooseVersion('1.2')
 
 
 # NOTE: you need this func to generate our sphinx doc
@@ -257,30 +253,7 @@ def main(cmd_args):
             level=logging.WARN, format='%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s')
         logging.warning('Skip DEBUG/INFO messages')
 
-    # If --ngpu is not given,
-    #   1. if CUDA_VISIBLE_DEVICES is set, all visible devices
-    #   2. if nvidia-smi exists, use all devices
-    #   3. else ngpu=0
-    if args.ngpu is None:
-        cvd = os.environ.get("CUDA_VISIBLE_DEVICES")
-        if cvd is not None:
-            ngpu = len(cvd.split(','))
-        else:
-            logging.warning("CUDA_VISIBLE_DEVICES is not set.")
-            try:
-                p = subprocess.run(['nvidia-smi', '-L'],
-                                   stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE)
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                ngpu = 0
-            else:
-                ngpu = len(p.stderr.decode().split('\n')) - 1
-    else:
-        if is_torch_1_2_plus and args.ngpu != 1:
-            logging.debug("There are some bugs with multi-GPU processing in PyTorch 1.2+" +
-                          " (see https://github.com/pytorch/pytorch/issues/21108)")
-        ngpu = args.ngpu
-    logging.info(f"ngpu: {ngpu}")
+    count_gpus(args)
 
     # display PYTHONPATH
     logging.info('python path = ' + os.environ.get('PYTHONPATH', '(None)'))

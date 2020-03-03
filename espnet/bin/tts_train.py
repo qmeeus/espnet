@@ -15,7 +15,7 @@ import configargparse
 import numpy as np
 
 from espnet.nets.tts_interface import TTSInterface
-from espnet.utils.cli_utils import strtobool
+from espnet.utils.cli_utils import strtobool, count_gpus
 from espnet.utils.training.batchfy import BATCH_COUNT_CHOICES
 
 
@@ -146,27 +146,7 @@ def main(cmd_args):
             level=logging.WARN, format='%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s')
         logging.warning('Skip DEBUG/INFO messages')
 
-    # If --ngpu is not given,
-    #   1. if CUDA_VISIBLE_DEVICES is set, all visible devices
-    #   2. if nvidia-smi exists, use all devices
-    #   3. else ngpu=0
-    if args.ngpu is None:
-        cvd = os.environ.get("CUDA_VISIBLE_DEVICES")
-        if cvd is not None:
-            ngpu = len(cvd.split(','))
-        else:
-            logging.warning("CUDA_VISIBLE_DEVICES is not set.")
-            try:
-                p = subprocess.run(['nvidia-smi', '-L'],
-                                   stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE)
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                ngpu = 0
-            else:
-                ngpu = len(p.stderr.decode().split('\n')) - 1
-    else:
-        ngpu = args.ngpu
-    logging.info(f"ngpu: {ngpu}")
+    count_gpus(args)
 
     # set random seed
     logging.info('random seed = %d' % args.seed)
