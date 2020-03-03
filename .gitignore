@@ -27,6 +27,14 @@ test_spm.model
 *.vim
 *.swp
 
+# dependencies
+tools/venv
+tools/kaldi
+
+# symlinks in recipe
+egs/*/*/utils
+egs/*/*/tools
+
 # recipe related
 egs*/*/*/data*
 egs*/*/*/db
