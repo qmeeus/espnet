@@ -24,6 +24,14 @@ test_spm.vocab
 test_spm.model
 .vscode*
 
+# dependencies
+tools/venv
+tools/kaldi
+
+# symlinks in recipe
+egs/*/*/utils
+egs/*/*/tools
+
 # recipe related
 egs/*/*/data*
 egs/*/*/db
