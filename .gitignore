@@ -30,11 +30,10 @@ test_spm.model
 tools/venv
 tools/kaldi
 
-# symlinks in recipe
+# recipe related
 egs/*/*/utils
 egs/*/*/tools
-
-# recipe related
+egs/*/*/outputs
 egs/*/*/data*
 egs/*/*/db
 egs/*/*/downloads
