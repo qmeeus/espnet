@@ -31,8 +31,6 @@ tools/venv
 tools/kaldi
 
 # recipe related
-egs/*/*/steps
-egs/*/*/utils
 egs/*/*/tools
 egs/*/*/outputs
 egs/*/*/data*
