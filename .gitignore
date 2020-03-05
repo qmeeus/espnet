@@ -31,22 +31,21 @@ test_spm.model
 tools/venv
 tools/kaldi
 
-# symlinks in recipe
+# recipe related
 egs/*/*/utils
 egs/*/*/tools
-
-# recipe related
-egs*/*/*/data*
-egs*/*/*/db
-egs*/*/*/downloads
-egs*/*/*/dump
-egs*/*/*/enhan
-egs*/*/*/exp
-egs*/*/*/fbank
-egs*/*/*/mfcc
-egs*/*/*/stft
-egs*/*/*/tensorboard
-egs*/*/*/wav*
+egs/*/*/outputs
+egs/*/*/data*
+egs/*/*/db
+egs/*/*/downloads
+egs/*/*/dump
+egs/*/*/enhan
+egs/*/*/exp
+egs/*/*/fbank
+egs/*/*/mfcc
+egs/*/*/stft
+egs/*/*/tensorboard
+egs/*/*/wav*
 
 # tools related
 tools/bin

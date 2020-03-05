@@ -1,65 +1,30 @@
-#!/bin/bash
+#!/bin/bash -xe
 
 # Copyright 2017 Johns Hopkins University (Shinji Watanabe)
 #  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
 
-. ./path.sh || exit 1;
-. ./cmd.sh || exit 1;
+. setup.sh
+. path.sh
+. cmd.sh
+. settings.sh
+. utils/parse_options.sh
 
-# general configuration
-backend=pytorch
-stage=-1       # start from -1 if you need to start from data download
-stop_stage=100
-ngpu=1         # number of gpus ("0" uses cpu, otherwise use gpu)
-debugmode=1
-dumpdir=dump   # directory to dump full features
-N=0            # number of minibatches to be used (mainly for debugging). "0" uses all minibatches.
-verbose=1      # verbose option
-resume=        # Resume the training from snapshot
-
-# feature configuration
-do_delta=false
-
-train_config=conf/train_mtlalpha1.0.yaml
-lm_config=conf/lm.yaml
-decode_config=conf/decode_ctcweight1.0.yaml
-
-# rnnlm related
-use_wordlm=true     # false means to train/use a character LM
-lm_vocabsize=100    # effective only for word LMs
-lmtag=              # tag for managing LMs
-lm_resume=          # specify a snapshot file to resume LM training
-
-# decoding parameter
-recog_model=model.loss.best # set a model to be used for decoding: 'model.acc.best' or 'model.loss.best'
-
-# data
-datadir=./downloads
-an4_root=${datadir}/an4
-data_url=http://www.speech.cs.cmu.edu/databases/an4/
-
-# exp tag
-tag="" # tag for managing experiments.
-
-. utils/parse_options.sh || exit 1;
-
-# Set bash to 'debug' mode, it will exit on :
-# -e 'error', -u 'undefined variable', -o ... 'error in pipeline', -x 'print commands',
-set -e
 set -u
 set -o pipefail
 
-train_set="train_nodev"
-train_dev="train_dev"
-lm_test="test"
-recog_set="train_dev test"
-
+# =======================================================================================
+#                                     DOWNLOAD
+# =======================================================================================
 if [ ${stage} -le -1 ] && [ ${stop_stage} -ge -1 ]; then
     echo "stage -1: Data Download"
     mkdir -p ${datadir}
     local/download_and_untar.sh ${datadir} ${data_url}
 fi
 
+
+# =======================================================================================
+#                                  PRELIMINARIES
+# =======================================================================================
 if [ ${stage} -le 0 ] && [ ${stop_stage} -ge 0 ]; then
     ### Task dependent. You have to make data the following preparation part by yourself.
     ### But you can utilize Kaldi recipes in most cases
@@ -81,6 +46,10 @@ if [ ${stage} -le 0 ] && [ ${stop_stage} -ge 0 ]; then
     done
 fi
 
+
+# =======================================================================================
+#                                  PREPROCESSING
+# =======================================================================================
 feat_tr_dir=${dumpdir}/${train_set}/delta${do_delta}; mkdir -p ${feat_tr_dir}
 feat_dt_dir=${dumpdir}/${train_dev}/delta${do_delta}; mkdir -p ${feat_dt_dir}
 if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
@@ -116,6 +85,10 @@ if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
     done
 fi
 
+
+# =======================================================================================
+#                              DICTIONARY AND SUBSETS
+# =======================================================================================
 dict=data/lang_1char/${train_set}_units.txt
 echo "dictionary: ${dict}"
 if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
@@ -140,8 +113,12 @@ if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
 fi
 
 
+# =======================================================================================
+#                                   LANGUAGE MODEL
+# =======================================================================================
 # It takes about one day. If you just want to do end-to-end ASR without LM,
 # you can skip this and remove --rnnlm option in the recognition (stage 5)
+
 if [ -z ${lmtag} ]; then
     lmtag=$(basename ${lm_config%.*})
     if [ ${use_wordlm} = true ]; then
@@ -191,6 +168,9 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
 fi
 
 
+# =======================================================================================
+#                                       TRAINING
+# =======================================================================================
 if [ -z ${tag} ]; then
     expname=${train_set}_${backend}_$(basename ${train_config%.*})
     if ${do_delta}; then
@@ -213,6 +193,7 @@ if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
         --tensorboard-dir tensorboard/${expname} \
         --debugmode ${debugmode} \
         --dict ${dict} \
+        --ctc_type builtin \
         --debugdir ${expdir} \
         --minibatches ${N} \
         --verbose ${verbose} \
@@ -221,9 +202,13 @@ if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
         --valid-json ${feat_dt_dir}/data.json
 fi
 
+
+# =======================================================================================
+#                                       DECODING
+# =======================================================================================
 if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
     echo "stage 5: Decoding"
-    nj=8
+    n_jobs=8
 
     pids=() # initialize pids
     for rtask in ${recog_set}; do
@@ -237,19 +222,19 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
         feat_recog_dir=${dumpdir}/${rtask}/delta${do_delta}
 
         # split data
-        splitjson.py --parts ${nj} ${feat_recog_dir}/data.json
+        splitjson.py --parts ${n_jobs} ${feat_recog_dir}/data.json
 
         #### use CPU for decoding
         ngpu=0
 
-        ${decode_cmd} JOB=1:${nj} ${expdir}/${decode_dir}/log/decode.JOB.log \
+        ${decode_cmd} JOB=1:${n_jobs} ${expdir}/${decode_dir}/log/decode.JOB.log \
             asr_recog.py \
             --config ${decode_config} \
             --ngpu ${ngpu} \
             --backend ${backend} \
             --debugmode ${debugmode} \
             --verbose ${verbose} \
-            --recog-json ${feat_recog_dir}/split${nj}utt/data.JOB.json \
+            --recog-json ${feat_recog_dir}/split${n_jobs}utt/data.JOB.json \
             --result-label ${expdir}/${decode_dir}/data.JOB.json \
             --model ${expdir}/results/${recog_model} \
             ${recog_opts}
@@ -260,5 +245,9 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
     pids+=($!) # store background pids
     done
     i=0; for pid in "${pids[@]}"; do wait ${pid} || ((++i)); done
-    [ ${i} -gt 0 ] && echo "$0: ${i} background jobs are failed." && false
+    if [ ${i} -gt 0 ]; then 
+        echo "$0: ${i} background jobs are failed."
+        exit 1
+    fi
 fi
+
