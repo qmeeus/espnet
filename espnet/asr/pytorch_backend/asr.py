@@ -500,14 +500,29 @@ def train(args):
     # actual bathsize is included in a list
     # default collate function converts numpy array to pytorch tensor
     # we used an empty collate function instead which returns list
-    train_iter = {'main': ChainerDataLoader(
-        dataset=TransformDataset(train, lambda data: converter([load_tr(data)])),
-        batch_size=1, num_workers=args.n_iter_processes,
-        shuffle=not use_sortagrad, collate_fn=lambda x: x[0])}
-    valid_iter = {'main': ChainerDataLoader(
-        dataset=TransformDataset(valid, lambda data: converter([load_cv(data)])),
-        batch_size=1, shuffle=False, collate_fn=lambda x: x[0],
-        num_workers=args.n_iter_processes)}
+    train_iter = {
+        'main': ChainerDataLoader(
+            dataset=TransformDataset(
+                train, lambda data: converter([load_tr(data)])
+            ),
+            batch_size=1, 
+            num_workers=args.n_iter_processes,
+            shuffle=not use_sortagrad, 
+            collate_fn=lambda x: x[0]
+        )
+    }
+    
+    valid_iter = {
+        'main': ChainerDataLoader(
+            dataset=TransformDataset(
+                valid, lambda data: converter([load_cv(data)])
+            ),
+            batch_size=1, 
+            shuffle=False, 
+            collate_fn=lambda x: x[0],
+            num_workers=args.n_iter_processes
+        )
+    }
 
     # Set up a trainer
     updater = CustomUpdater(
