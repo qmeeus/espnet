@@ -6,8 +6,9 @@ RequestMemory       = 8G
 +RequestWallTime    = 100000
 Request_GPUs	    = 1
 Requirements        = ( HasSingularity ) && \
-                      ( CUDAGlobalMemoryMb > 6G ) && \
-                      ( CUDACapability >= 3.5 )
+                      ( CUDAGlobalMemoryMb > 6G ) 
+#                      && \
+#                      ( CUDACapability >= 3.5 )
 
 Initialdir = /esat/spchdisk/scratch/qmeeus/repos/espnet/egs/cgn/asr1
 Executable       = ./sg_run.sh 
