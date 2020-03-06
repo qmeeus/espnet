@@ -15,7 +15,7 @@ resume=        # Resume the training from snapshot
 # feature configuration
 do_delta=false
 
-train_config=conf/train_vggbgrup_mtalpha1.0.yaml
+train_config=conf/train_mtlalpha0.5.yaml
 lm_config=
 decode_config=conf/decode.yaml
 
