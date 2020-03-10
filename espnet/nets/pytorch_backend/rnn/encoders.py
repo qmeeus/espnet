@@ -57,7 +57,7 @@ class RNNP(torch.nn.Module):
         :return: batch of hidden state sequences (B, Tmax, hdim)
         :rtype: torch.Tensor
         """
-        # logging.info(self.__class__.__name__ + ' input lengths: ' + str(ilens))
+        logging.debug(self.__class__.__name__ + ' input lengths: ' + str(ilens))
         elayer_states = []
         for layer in six.moves.range(self.elayers):
             xs_pack = pack_padded_sequence(xs_pad, ilens, batch_first=True)
@@ -69,13 +69,14 @@ class RNNP(torch.nn.Module):
             elayer_states.append(states)
             # ys: utt list of frame x cdim x 2 (2: means bidirectional)
             ys_pad, ilens = pad_packed_sequence(ys, batch_first=True)
+            ilens = ilens.to(xs_pad.device)
             sub = self.subsample[layer + 1]
             if sub > 1:
                 ys_pad = ys_pad[:, ::sub]
-                ilens = [int(i + 1) // sub for i in ilens]
+                ilens = ((ilens.float() + 1) / sub).floor().type_as(ilens)
             # (sum _utt frame_utt) x dim
-            projected = getattr(self, 'bt' + str(layer)
-                                )(ys_pad.contiguous().view(-1, ys_pad.size(2)))
+            projection_layer = getattr(self, 'bt' + str(layer))
+            projected = projection_layer(ys_pad.contiguous().view(-1, ys_pad.size(2)))
             if layer == self.elayers - 1:
                 xs_pad = projected.view(ys_pad.size(0), ys_pad.size(1), -1)
             else:
@@ -117,7 +118,7 @@ class RNN(torch.nn.Module):
         :return: batch of hidden state sequences (B, Tmax, eprojs)
         :rtype: torch.Tensor
         """
-        logging.info(self.__class__.__name__ + ' input lengths: ' + str(ilens))
+        logging.debug(self.__class__.__name__ + ' input lengths: ' + str(ilens))
         xs_pack = pack_padded_sequence(xs_pad, ilens, batch_first=True)
         self.nbrnn.flatten_parameters()
         if prev_state is not None and self.nbrnn.bidirectional:
@@ -168,7 +169,7 @@ class VGG2L(torch.nn.Module):
         :return: batch of padded hidden state sequences (B, Tmax // 4, 128 * D // 4)
         :rtype: torch.Tensor
         """
-        logging.info(self.__class__.__name__ + ' input lengths: ' + str(ilens))
+        logging.debug(self.__class__.__name__ + ' input lengths: ' + str(ilens))
 
         # x: utt x frame x dim
         # xs_pad = F.pad_sequence(xs_pad)
@@ -218,6 +219,7 @@ class Encoder(torch.nn.Module):
         typ = etype.lstrip("vgg").rstrip("p")
         if typ not in ['lstm', 'gru', 'blstm', 'bgru']:
             logging.error("Error: need to specify an appropriate encoder architecture")
+            raise TypeError("Invalid argument: {}".format(typ))
 
         if etype.startswith("vgg"):
             if etype[-1] == "p":

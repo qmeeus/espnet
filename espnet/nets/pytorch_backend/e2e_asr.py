@@ -44,16 +44,12 @@ CTC_LOSS_THRESHOLD = 10000
 class Reporter(chainer.Chain):
     """A chainer reporter wrapper."""
 
-    def report(self, loss_ctc, loss_att, acc, cer_ctc, cer, wer, mtl_loss):
-        """Report at every step."""
-        reporter.report({'loss_ctc': loss_ctc}, self)
-        reporter.report({'loss_att': loss_att}, self)
-        reporter.report({'acc': acc}, self)
-        reporter.report({'cer_ctc': cer_ctc}, self)
-        reporter.report({'cer': cer}, self)
-        reporter.report({'wer': wer}, self)
-        logging.info('mtl loss:' + str(mtl_loss))
-        reporter.report({'loss': mtl_loss}, self)
+    def report(self, **metrics):
+        """Report at every step.
+        Expected: loss_ctc, loss_att, accuracy, cer_ctc, cer, wer, loss
+        """
+        for name, value in metrics.items():
+            reporter.report({name: value}, self)
 
 
 class E2E(ASRInterface, torch.nn.Module):
@@ -218,8 +214,6 @@ class E2E(ASRInterface, torch.nn.Module):
         self.rnnlm = None
 
         self.logzero = -10000000000.0
-        self.loss = None
-        self.acc = None
 
     def init_like_chainer(self):
         """Initialize weight like chainer.
@@ -239,7 +233,7 @@ class E2E(ASRInterface, torch.nn.Module):
         for l in six.moves.range(len(self.dec.decoder)):
             set_forget_bias_to_one(self.dec.decoder[l].bias_ih)
 
-    def forward(self, xs_pad, ilens, ys_pad):
+    def forward(self, xs_pad, ilens, ys_pad, calc_metrics=False, compat_on=True):
         """E2E forward.
 
         :param torch.Tensor xs_pad: batch of padded input sequences (B, Tmax, idim)
@@ -248,6 +242,12 @@ class E2E(ASRInterface, torch.nn.Module):
         :return: loss value
         :rtype: torch.Tensor
         """
+        alpha = self.mtlalpha
+
+        # HACK
+        if compat_on:
+            calc_metrics = True
+
         # 0. Frontend
         if self.frontend is not None:
             hs_pad, hlens, mask = self.frontend(to_torch_tensor(xs_pad), ilens)
@@ -258,44 +258,98 @@ class E2E(ASRInterface, torch.nn.Module):
         # 1. Encoder
         hs_pad, hlens, _ = self.enc(hs_pad, hlens)
 
-        # 2. CTC loss
-        if self.mtlalpha == 0:
-            self.loss_ctc = None
-        else:
-            self.loss_ctc = self.ctc(hs_pad, hlens, ys_pad)
+        # 2. Loss
+        losses = self.compute_loss(hs_pad, hlens, ys_pad)
 
-        # 3. attention loss
-        if self.mtlalpha == 1:
-            self.loss_att, acc = None, None
-        else:
-            self.loss_att, acc, _ = self.dec(hs_pad, hlens, ys_pad)
-        self.acc = acc
+        # 3. Metrics HACK
+        if calc_metrics:
+            metrics = self.compute_metrics(hs_pad, hlens, ys_pad)
+            output = dict(**losses, **metrics)
 
-        # 4. compute cer without beam search
+            if compat_on:
+                # 4. Log metrics
+                self.log_metrics(output)
+            
+            if not compat_on:
+                return output
+
+        if compat_on:
+            return output["loss"]        
+
+        return losses
+
+    def log_metrics(self, metrics):
+        # FIXME: HACKY for compatibility with self.reporter
+        # HACK: Convert to non tensors if necessary
+        metrics = {k: v.item() if hasattr(v, 'item') else v for k, v in metrics.items()}
+        loss = metrics["loss"]
+        if loss < CTC_LOSS_THRESHOLD and not math.isnan(loss):
+            self.reporter.report(**metrics)
+        else:
+            logging.warning('loss (=%f) is not correct', loss.item())
+
+
+    def compute_metrics(self, hs_pad, hlens, ys_pad):
+        # 1. compute cer without beam search
+        cer_ctc = self.compute_cer_ctc(hs_pad, ys_pad)
+
+        # 2. compute cer/wer
+        wer, cer = self.compute_wer_cer(hs_pad, hlens, ys_pad)
+
+        return {"cer_ctc": cer_ctc, "wer": wer, "cer": cer}
+
+
+    def compute_loss(self, hs_pad, hlens, ys_pad):
+        alpha = self.mtlalpha
+
+        # 1. CTC loss
+        loss_ctc = (
+            self.ctc.compute_loss(hs_pad, hlens, ys_pad) 
+            if alpha > 0 else None
+        )
+        
+        # 2. attention loss
+        loss_att, accuracy, _ = (
+            self.dec.compute_loss(hs_pad, hlens, ys_pad) 
+            if alpha < 1 else [None] * 3
+        )
+
+        # 3. total loss
+        loss = alpha * (loss_ctc or 0) + (1 - alpha) * (loss_att or 0)
+
+        return {
+            "loss": loss, 
+            "loss_ctc": loss_ctc.item() if loss_ctc else None, 
+            "loss_att": loss_att.item() if loss_att else None, 
+            "accuracy": accuracy
+        }
+
+    def compute_cer_ctc(self, hs_pad, ys_pad):
         if self.mtlalpha == 0 or self.char_list is None:
-            cer_ctc = None
-        else:
-            cers = []
+            return
 
-            y_hats = self.ctc.argmax(hs_pad).data
-            for i, y in enumerate(y_hats):
-                y_hat = [x[0] for x in groupby(y)]
-                y_true = ys_pad[i]
+        cers = []
 
-                seq_hat = [self.char_list[int(idx)] for idx in y_hat if int(idx) != -1]
-                seq_true = [self.char_list[int(idx)] for idx in y_true if int(idx) != -1]
-                seq_hat_text = "".join(seq_hat).replace(self.space, ' ')
-                seq_hat_text = seq_hat_text.replace(self.blank, '')
-                seq_true_text = "".join(seq_true).replace(self.space, ' ')
+        y_hats = self.ctc.argmax(hs_pad).data
+        for i, y in enumerate(y_hats):
+            y_hat = [x[0] for x in groupby(y)]
+            y_true = ys_pad[i]
 
-                hyp_chars = seq_hat_text.replace(' ', '')
-                ref_chars = seq_true_text.replace(' ', '')
-                if len(ref_chars) > 0:
-                    cers.append(editdistance.eval(hyp_chars, ref_chars) / len(ref_chars))
+            seq_hat = [self.char_list[int(idx)] for idx in y_hat if int(idx) != -1]
+            seq_true = [self.char_list[int(idx)] for idx in y_true if int(idx) != -1]
+            seq_hat_text = "".join(seq_hat).replace(self.space, ' ')
+            seq_hat_text = seq_hat_text.replace(self.blank, '')
+            seq_true_text = "".join(seq_true).replace(self.space, ' ')
 
-            cer_ctc = sum(cers) / len(cers) if cers else None
+            hyp_chars = seq_hat_text.replace(' ', '')
+            ref_chars = seq_true_text.replace(' ', '')
+            if len(ref_chars) > 0:
+                cers.append(editdistance.eval(hyp_chars, ref_chars) / len(ref_chars))
 
-        # 5. compute cer/wer
+            return sum(cers) / len(cers) if cers else None
+
+    def compute_wer_cer(self, hs_pad, hlens, ys_pad):
+
         if self.training or not (self.report_cer or self.report_wer):
             cer, wer = 0.0, 0.0
             # oracle_cer, oracle_wer = 0.0, 0.0
@@ -333,30 +387,11 @@ class E2E(ASRInterface, torch.nn.Module):
             wer = 0.0 if not self.report_wer else float(sum(word_eds)) / sum(word_ref_lens)
             cer = 0.0 if not self.report_cer else float(sum(char_eds)) / sum(char_ref_lens)
 
-        alpha = self.mtlalpha
-        if alpha == 0:
-            self.loss = self.loss_att
-            loss_att_data = float(self.loss_att)
-            loss_ctc_data = None
-        elif alpha == 1:
-            self.loss = self.loss_ctc
-            loss_att_data = None
-            loss_ctc_data = float(self.loss_ctc)
-        else:
-            self.loss = alpha * self.loss_ctc + (1 - alpha) * self.loss_att
-            loss_att_data = float(self.loss_att)
-            loss_ctc_data = float(self.loss_ctc)
-
-        loss_data = float(self.loss)
-        if loss_data < CTC_LOSS_THRESHOLD and not math.isnan(loss_data):
-            self.reporter.report(loss_ctc_data, loss_att_data, acc, cer_ctc, cer, wer, loss_data)
-        else:
-            logging.warning('loss (=%f) is not correct', loss_data)
-        return self.loss
+        return wer, cer
 
     def scorers(self):
         """Scorers."""
-        return dict(decoder=self.dec, ctc=CTCPrefixScorer(self.ctc, self.eos))
+        return dict(decoder=self.dec, ctc=CTCPrefixScorer(self.ctc.compute_loss, self.eos))
 
     def encode(self, x):
         """Encode acoustic features.

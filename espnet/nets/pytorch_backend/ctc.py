@@ -2,6 +2,7 @@ import logging
 
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
 from espnet.nets.pytorch_backend.nets_utils import to_device
@@ -18,15 +19,15 @@ class CTC(torch.nn.Module):
     """
 
     def __init__(self, odim, eprojs, dropout_rate, ctc_type='warpctc', reduce=True):
-        super().__init__()
+        super(CTC, self).__init__()
         self.dropout_rate = dropout_rate
-        self.loss = None
-        self.ctc_lo = torch.nn.Linear(eprojs, odim)
+        self.output_proj = nn.Linear(eprojs, odim)
+        self.dropout = nn.Dropout(p=dropout_rate)
         self.ctc_type = ctc_type
 
         if self.ctc_type == 'builtin':
             reduction_type = 'sum' if reduce else 'none'
-            self.ctc_loss = torch.nn.CTCLoss(reduction=reduction_type)
+            self.ctc_loss = nn.CTCLoss(reduction=reduction_type, zero_infinity=True)
         elif self.ctc_type == 'warpctc':
             import warpctc_pytorch as warp_ctc
             self.ctc_loss = warp_ctc.CTCLoss(size_average=True, reduce=reduce)
@@ -52,28 +53,25 @@ class CTC(torch.nn.Module):
         else:
             raise NotImplementedError
 
-    def forward(self, hs_pad, hlens, ys_pad):
-        """CTC forward
+    def forward(self, hs_pad):
+        # encoder output -> class probabilities
+        return self.output_proj(self.dropout(hs_pad))
 
+    def compute_loss(self, hs_pad, hlens, ys_pad):
+        """
         :param torch.Tensor hs_pad: batch of padded hidden state sequences (B, Tmax, D)
         :param torch.Tensor hlens: batch of lengths of hidden state sequences (B)
         :param torch.Tensor ys_pad: batch of padded character id sequence tensor (B, Lmax)
         :return: ctc loss value
         :rtype: torch.Tensor
         """
-        # TODO(kan-bayashi): need to make more smart way
-        ys = [y[y != self.ignore_id] for y in ys_pad]  # parse padded ys
-
-        self.loss = None
-        hlens = torch.from_numpy(np.fromiter(hlens, dtype=np.int32))
-        olens = torch.from_numpy(np.fromiter(
-            (x.size(0) for x in ys), dtype=np.int32))
-
-        # zero padding for hs
-        ys_hat = self.ctc_lo(F.dropout(hs_pad, p=self.dropout_rate))
-
-        # zero padding for ys
-        ys_true = torch.cat(ys).cpu().int()  # batch x olen
+        # ctc loss accepts both (B, Lo) and (B*sum(Lo)) targets
+        # in the first case, targets are padded to the length of the longuest example
+        # in the second case, targets are unpadded and concatenated in a 1d tensor 
+        ys_true = ys_pad.flatten()  # parse padded ys
+        ys_true = ys_true[ys_true != self.ignore_id].contiguous()
+        olens = (ys_pad != self.ignore_id).sum(-1)
+        ys_hat = self.forward(hs_pad)
 
         # get length info
         logging.debug(self.__class__.__name__ + ' input lengths:  ' + ''.join(str(hlens).split('\n')))
@@ -89,14 +87,16 @@ class CTC(torch.nn.Module):
         else:
             # use GPU when using the cuDNN implementation
             ys_true = to_device(self, ys_true)
-        self.loss = to_device(self, self.loss_fn(ys_hat, ys_true, hlens, olens)).to(dtype=dtype)
+
+        loss = self.loss_fn(ys_hat, ys_true, hlens, olens)
+        # loss = to_device(self, loss)).to(dtype=dtype)
         if self.reduce:
             # NOTE: sum() is needed to keep consistency since warpctc return as tensor w/ shape (1,)
             # but builtin return as tensor w/o shape (scalar).
-            self.loss = self.loss.sum()
-            logging.info('ctc loss:' + str(float(self.loss)))
+            loss = loss.sum()
+            logging.debug('ctc loss: {:.3f}'.format(loss.item()))
 
-        return self.loss
+        return loss
 
     def log_softmax(self, hs_pad):
         """log_softmax of frame activations
@@ -105,7 +105,7 @@ class CTC(torch.nn.Module):
         :return: log softmax applied 3d tensor (B, Tmax, odim)
         :rtype: torch.Tensor
         """
-        return F.log_softmax(self.ctc_lo(hs_pad), dim=2)
+        return F.log_softmax(self.output_proj(hs_pad), dim=2)
 
     def argmax(self, hs_pad):
         """argmax of frame activations
@@ -114,7 +114,7 @@ class CTC(torch.nn.Module):
         :return: argmax applied 2d tensor (B, Tmax)
         :rtype: torch.Tensor
         """
-        return torch.argmax(self.ctc_lo(hs_pad), dim=2)
+        return torch.argmax(self.output_proj(hs_pad), dim=2)
 
 
 def ctc_for(args, odim, reduce=True):

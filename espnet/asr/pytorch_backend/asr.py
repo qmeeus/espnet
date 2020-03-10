@@ -6,36 +6,25 @@
 
 """Training/decoding definition for the speech recognition task."""
 
-import copy
 import json
 import logging
 import os
 import sys
-import operator
 
-from chainer import training
-from chainer.training import extensions
 import numpy as np
-from tensorboardX import SummaryWriter
 import torch
-from torch.nn.parallel import data_parallel
 
-from espnet.asr.asr_utils import adadelta_eps_decay
+from torch.utils.data import DataLoader 
+
+from espnet.data.dataset import ASRDataset
 from espnet.asr.asr_utils import add_results_to_json
-from espnet.asr.asr_utils import CompareValueTrigger
 from espnet.asr.asr_utils import format_mulenc_args
 from espnet.asr.asr_utils import get_model_conf
 from espnet.asr.asr_utils import plot_spectrogram
-from espnet.asr.asr_utils import restore_snapshot
-from espnet.asr.asr_utils import snapshot_object
 from espnet.asr.asr_utils import torch_load
-from espnet.asr.asr_utils import torch_resume
-from espnet.asr.asr_utils import torch_snapshot
 from espnet.asr.pytorch_backend.asr_init import load_trained_model
 from espnet.asr.pytorch_backend.asr_init import load_trained_modules
-from espnet.asr.pytorch_backend.evaluator import CustomEvaluator
 from espnet.asr.pytorch_backend.converter import CustomConverter, CustomConverterMulEnc
-from espnet.asr.pytorch_backend.updater import CustomUpdater
 from espnet.asr.pytorch_backend.trainer import CustomTrainer
 
 import espnet.lm.pytorch_backend.extlm as extlm_pytorch
@@ -54,9 +43,6 @@ from espnet.utils.io_utils import LoadInputsAndTargets
 from espnet.utils.training.batchfy import make_batchset
 from espnet.utils.training.iterators import ShufflingEnabler
 from espnet.utils.training.tensorboard_logger import TensorboardLogger
-from espnet.utils.training.train_utils import check_early_stop
-from espnet.utils.training.train_utils import set_early_stop
-from espnet.utils.torch_utils import _recursive_to
 
 import matplotlib
 matplotlib.use('Agg')
@@ -66,6 +52,7 @@ if sys.version_info[0] == 2:
 else:
     from itertools import zip_longest as zip_longest    
 
+DEBUG_MODEL = True
 
 def build_model(list_input_dim, output_dim, args):
 
@@ -133,7 +120,6 @@ def train(args):
         args (namespace): The program arguments.
 
     """
-
     # SETUP AND PRELIMINARY OPERATIONS
     set_deterministic_pytorch(args)
     if args.num_encs > 1:
@@ -146,16 +132,24 @@ def train(args):
     if not os.path.exists(args.outdir):
         os.makedirs(args.outdir)
 
-    # TODO: input/output dims from model --> pass to build_model
-    # get input and output dimension info
-    with open(args.valid_json, 'rb') as f:
-        valid_json = json.load(f)['utts']
-    utts = list(valid_json.keys())
-    idim_list = [int(valid_json[utts[0]]['input'][i]['shape'][-1]) for i in range(args.num_encs)]
-    odim = int(valid_json[utts[0]]['output'][0]['shape'][-1])
-    for i in range(args.num_encs):
-        logging.info('stream{}: input dims : {}'.format(i + 1, idim_list[i]))
-    logging.info('#output dims: ' + str(odim))
+    if not DEBUG_MODEL:
+        training_set, validation_set = (
+            ASRDataset.from_json(getattr(args, json_file))
+            for json_file in ('train_json', 'valid_json')
+        )
+
+        train_itr, valid_itr = (
+            DataLoader(dataset, batch_size=args.batch_size, 
+                    collate_fn=dataset.collate_samples)
+            for dataset in (training_set, validation_set)
+        )
+
+        input_dim_list = idim_list = training_set.input_dim
+        output_dim = odim = training_set.output_dim[0]
+
+        for i in range(args.num_encs):
+            logging.info('stream{}: input dims : {}'.format(i + 1, idim_list[i]))
+        logging.info('#output dims: ' + str(odim))
 
     # check the use of multi-gpu
     if args.ngpu > 1:
@@ -185,12 +179,21 @@ def train(args):
         args.mtl_mode = 'mtl'
         logging.info('Multitask learning mode')
 
+    if DEBUG_MODEL:
+        from pytorch_lightning import Trainer
+        from espnet.asr.pytorch_backend.model import ASRModel
+        import ipdb; ipdb.set_trace()
+
+        model_class = dynamic_import(args.model_module)
+        model = ASRModel(model_class, args) 
+        trainer = Trainer(gpus=[1], log_gpu_memory='all', overfit_pct=.01, profiler=True)
+        trainer.fit(model)
+        return
+
     # MODEL AND OPTIMIZER CONFIGURATION
     model = build_model(idim_list, odim, args)
     reporter = model.reporter
-
     model = model.to(device=device, dtype=dtype)
-
     optimizer = get_optimizer(model, args)
 
     # setup apex.amp
@@ -271,13 +274,11 @@ def train(args):
 
     # TRAINER CONFIGURATION
     # Set up a trainer
-    updater = CustomUpdater(
-        model, args.grad_clip, train_iter, optimizer,
-        device, args.ngpu, args.grad_noise, args.accum_grad, use_apex=args.use_apex
+    trainer = CustomTrainer(
+        args, model, optimizer, train_iter, valid_iter, converter, device, valid_json, load_cv
     )
 
-    evaluator = CustomEvaluator(model, valid_iter, reporter, device, args.ngpu)
-    trainer = CustomTrainer(args, model, optimizer, train_iter, valid_iter, device, valid_json, load_cv)
+    logging.info("Start training")
     trainer.run()
 
 def recog(args):

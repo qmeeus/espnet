@@ -78,7 +78,6 @@ class Decoder(torch.nn.Module, ScorerInterface):
         else:
             self.output = torch.nn.Linear(dunits, odim)
 
-        self.loss = None
         self.att = att
         self.dunits = dunits
         self.sos = sos
@@ -131,6 +130,8 @@ class Decoder(torch.nn.Module, ScorerInterface):
         :rtype: float
         """
         # to support mutiple encoder asr mode, in single encoder mode, convert torch.Tensor to List of torch.Tensor
+        batch_size, output_length = ys_pad.size()
+        output_length += 1  # Account for eos token
         if self.num_encs == 1:
             hs_pad = [hs_pad]
             hlens = [hlens]
@@ -141,33 +142,18 @@ class Decoder(torch.nn.Module, ScorerInterface):
         # in SPA (speaker parallel attention), att_idx is used to select attention module. In other cases, it is 0.
         att_idx = min(strm_idx, len(self.att) - 1)
 
-        # hlens should be list of list of integer
+        # hlens should be list of list of integer --> TODO: WHY??
         hlens = [list(map(int, hlens[idx])) for idx in range(self.num_encs)]
 
-        self.loss = None
-        # prepare input and output word sequences with sos/eos IDs
-        eos = ys[0].new([self.eos])
-        sos = ys[0].new([self.sos])
+        # prepare input word sequences with sos IDs
         if self.replace_sos:
             ys_in = [torch.cat([idx, y], dim=0) for idx, y in zip(lang_ids, ys)]
         else:
+            sos = ys[0].new([self.sos])
             ys_in = [torch.cat([sos, y], dim=0) for y in ys]
-        ys_out = [torch.cat([y, eos], dim=0) for y in ys]
 
-        # padding for ys with -1
-        # pys: utt x olen
         ys_in_pad = pad_list(ys_in, self.eos)
-        ys_out_pad = pad_list(ys_out, self.ignore_id)
-
-        # get dim, length info
-        batch = ys_out_pad.size(0)
-        olength = ys_out_pad.size(1)
-        for idx in range(self.num_encs):
-            logging.info(
-                self.__class__.__name__ + 'Number of Encoder:{}; enc{}: input lengths: {}.'.format(self.num_encs,
-                                                                                                   idx + 1, hlens[idx]))
-        logging.info(self.__class__.__name__ + ' output lengths: ' + str([y.size(0) for y in ys_out]))
-
+        
         # initialization
         c_list = [self.zero_state(hs_pad[0])]
         z_list = [self.zero_state(hs_pad[0])]
@@ -188,7 +174,7 @@ class Decoder(torch.nn.Module, ScorerInterface):
         eys = self.dropout_emb(self.embed(ys_in_pad))  # utt x olen x zdim
 
         # loop for an output sequence
-        for i in six.moves.range(olength):
+        for i in six.moves.range(output_length):
             if self.num_encs == 1:
                 att_c, att_w = self.att[att_idx](hs_pad[0], hlens[0], self.dropout_dec[0](z_list[0]), att_w)
             else:
@@ -201,7 +187,7 @@ class Decoder(torch.nn.Module, ScorerInterface):
                                                                            self.dropout_dec[0](z_list[0]),
                                                                            att_w_list[self.num_encs])
             if i > 0 and random.random() < self.sampling_probability:
-                logging.info(' scheduled sampling ')
+                logging.debug(' scheduled sampling ')
                 z_out = self.output(z_all[-1])
                 z_out = np.argmax(z_out.detach().cpu(), axis=1)
                 z_out = self.dropout_emb(self.embed(to_device(self, z_out)))
@@ -214,26 +200,54 @@ class Decoder(torch.nn.Module, ScorerInterface):
             else:
                 z_all.append(self.dropout_dec[-1](z_list[-1]))  # utt x (zdim)
 
-        z_all = torch.stack(z_all, dim=1).view(batch * olength, -1)
-        # compute loss
-        y_all = self.output(z_all)
+        z_all = torch.stack(z_all, dim=1).view(batch_size * output_length, -1)
+        return self.output(z_all)
+
+    def compute_loss(self, hs_pad, hlens, ys_pad, strm_idx=0, lang_ids=None):
+        batch_size, output_length = ys_pad.size()
+        output_length += 1
+
+        # FIXME
+        ys = [y[y != self.ignore_id] for y in ys_pad]  # parse padded ys
+        ylens = (ys_pad != self.ignore_id).sum(-1)
+        average_length = ylens.float().mean().item()
+
+        # prepare output word sequences with eos IDs
+        eos = ys[0].new([self.eos])        
+        ys_out = [torch.cat([y, eos], dim=0) for y in ys]
+        ys_out_pad = pad_list(ys_out, self.ignore_id)
+
+        # get dim, length info
+        for idx in range(self.num_encs):
+            logging.debug("{} Number of Encoder:{}; enc{}: input lengths: {}."
+                          .format(self.__class__.__name__, self.num_encs, idx + 1, hlens[idx]))
+
+        logging.debug("{}  output lengths: {}"
+                      .format(self.__class__.__name__, [y.size(0) for y in ys_out]))
+
+
+        y_all = self.forward(hs_pad, hlens, ys_pad)
+
         if LooseVersion(torch.__version__) < LooseVersion('1.0'):
             reduction_str = 'elementwise_mean'
         else:
             reduction_str = 'mean'
-        self.loss = F.cross_entropy(y_all, ys_out_pad.view(-1),
-                                    ignore_index=self.ignore_id,
-                                    reduction=reduction_str)
+
+        loss = F.cross_entropy(y_all, ys_out_pad.view(-1),
+                               ignore_index=self.ignore_id,
+                               reduction=reduction_str)
+
         # compute perplexity
-        ppl = math.exp(self.loss.item())
-        # -1: eos, which is removed in the loss computation
-        self.loss *= (np.mean([len(x) for x in ys_in]) - 1)
+        ppl = math.exp(loss.item())
+
+        loss *= average_length
+        
         acc = th_accuracy(y_all, ys_out_pad, ignore_label=self.ignore_id)
-        logging.info('att loss:' + ''.join(str(self.loss.item()).split('\n')))
+        logging.debug('att loss:' + ''.join(str(loss.item()).split('\n')))
 
         # show predicted character sequence for debug
-        if self.verbose > 0 and self.char_list is not None:
-            ys_hat = y_all.view(batch, olength, -1)
+        if self.verbose > 1 and self.char_list is not None:
+            ys_hat = y_all.view(batch_size, output_length, -1)
             ys_true = ys_out_pad
             for (i, y_hat), y_true in zip(enumerate(ys_hat.detach().cpu().numpy()),
                                           ys_true.detach().cpu().numpy()):
@@ -252,9 +266,10 @@ class Decoder(torch.nn.Module, ScorerInterface):
             if self.vlabeldist is None:
                 self.vlabeldist = to_device(self, torch.from_numpy(self.labeldist))
             loss_reg = - torch.sum((F.log_softmax(y_all, dim=1) * self.vlabeldist).view(-1), dim=0) / len(ys_in)
-            self.loss = (1. - self.lsm_weight) * self.loss + self.lsm_weight * loss_reg
+            loss = (1. - self.lsm_weight) * loss + self.lsm_weight * loss_reg
 
-        return self.loss, acc, ppl
+        return loss, acc, ppl
+
 
     def recognize_beam(self, h, lpz, recog_args, char_list, rnnlm=None, strm_idx=0):
         """beam search implementation
@@ -278,7 +293,7 @@ class Decoder(torch.nn.Module, ScorerInterface):
             lpz = [lpz] * self.num_encs
 
         for idx in range(self.num_encs):
-            logging.info('Number of Encoder:{}; enc{}: input lengths: {}.'.format(self.num_encs, idx + 1, h[0].size(0)))
+            logging.debug('Number of Encoder:{}; enc{}: input lengths: {}.'.format(self.num_encs, idx + 1, h[0].size(0)))
         att_idx = min(strm_idx, len(self.att) - 1)
         # initialization
         c_list = [self.zero_state(h[0].unsqueeze(0))]
@@ -304,7 +319,7 @@ class Decoder(torch.nn.Module, ScorerInterface):
         if lpz[0] is not None and self.num_encs > 1:
             # weights-ctc, e.g. ctc_loss = w_1*ctc_1_loss + w_2 * ctc_2_loss + w_N * ctc_N_loss
             weights_ctc_dec = recog_args.weights_ctc_dec / np.sum(recog_args.weights_ctc_dec)  # normalize
-            logging.info('ctc weights (decoding): ' + ' '.join([str(x) for x in weights_ctc_dec]))
+            logging.debug('ctc weights (decoding): ' + ' '.join([str(x) for x in weights_ctc_dec]))
         else:
             weights_ctc_dec = [1.0]
 
@@ -313,8 +328,8 @@ class Decoder(torch.nn.Module, ScorerInterface):
             y = char_list.index(recog_args.tgt_lang)
         else:
             y = self.sos
-        logging.info('<sos> index: ' + str(y))
-        logging.info('<sos> mark: ' + char_list[y])
+        logging.debug('<sos> index: ' + str(y))
+        logging.debug('<sos> mark: ' + char_list[y])
         vy = h[0].new_zeros(1).long()
 
         maxlen = np.amin([h[idx].size(0) for idx in range(self.num_encs)])
@@ -322,8 +337,8 @@ class Decoder(torch.nn.Module, ScorerInterface):
             # maxlen >= 1
             maxlen = max(1, int(recog_args.maxlenratio * maxlen))
         minlen = int(recog_args.minlenratio * maxlen)
-        logging.info('max output length: ' + str(maxlen))
-        logging.info('min output length: ' + str(minlen))
+        logging.debug('max output length: ' + str(maxlen))
+        logging.debug('min output length: ' + str(minlen))
 
         # initialize hypothesis
         if rnnlm:
@@ -434,7 +449,7 @@ class Decoder(torch.nn.Module, ScorerInterface):
 
             # add eos in the final loop to avoid that there are no ended hyps
             if i == maxlen - 1:
-                logging.info('adding <eos> in the last position in the loop')
+                logging.debug('adding <eos> in the last position in the loop')
                 for hyp in hyps:
                     hyp['yseq'].append(self.eos)
 
@@ -456,14 +471,14 @@ class Decoder(torch.nn.Module, ScorerInterface):
 
             # end detection
             if end_detect(ended_hyps, i) and recog_args.maxlenratio == 0.0:
-                logging.info('end detected at %d', i)
+                logging.debug('end detected at %d', i)
                 break
 
             hyps = remained_hyps
             if len(hyps) > 0:
                 logging.debug('remaining hypotheses: ' + str(len(hyps)))
             else:
-                logging.info('no hypothesis. Finish decoding.')
+                logging.debug('no hypothesis. Finish decoding.')
                 break
 
             for hyp in hyps:
@@ -504,7 +519,7 @@ class Decoder(torch.nn.Module, ScorerInterface):
 
         att_idx = min(strm_idx, len(self.att) - 1)
         for idx in range(self.num_encs):
-            logging.info(
+            logging.debug(
                 'Number of Encoder:{}; enc{}: input lengths: {}.'.format(self.num_encs, idx + 1, h[idx].size(1)))
             h[idx] = mask_by_length(h[idx], hlens[idx], 0.0)
 
@@ -518,7 +533,7 @@ class Decoder(torch.nn.Module, ScorerInterface):
         # weights-ctc, e.g. ctc_loss = w_1*ctc_1_loss + w_2 * ctc_2_loss + w_N * ctc_N_loss
         if lpz[0] is not None and self.num_encs > 1:
             weights_ctc_dec = recog_args.weights_ctc_dec / np.sum(recog_args.weights_ctc_dec)  # normalize
-            logging.info('ctc weights (decoding): ' + ' '.join([str(x) for x in weights_ctc_dec]))
+            logging.debug('ctc weights (decoding): ' + ' '.join([str(x) for x in weights_ctc_dec]))
         else:
             weights_ctc_dec = [1.0]
 
@@ -531,8 +546,8 @@ class Decoder(torch.nn.Module, ScorerInterface):
         else:
             maxlen = max(1, int(recog_args.maxlenratio * max_hlen))
         minlen = int(recog_args.minlenratio * max_hlen)
-        logging.info('max output length: ' + str(maxlen))
-        logging.info('min output length: ' + str(minlen))
+        logging.debug('max output length: ' + str(maxlen))
+        logging.debug('min output length: ' + str(minlen))
 
         # initialization
         c_prev = [to_device(self, torch.zeros(n_bb, self.dunits)) for _ in range(self.dlayers)]
@@ -555,15 +570,15 @@ class Decoder(torch.nn.Module, ScorerInterface):
                 self.att[idx].reset()  # reset pre-computation of h in atts and han
 
         if self.replace_sos and recog_args.tgt_lang:
-            logging.info('<sos> index: ' + str(char_list.index(recog_args.tgt_lang)))
-            logging.info('<sos> mark: ' + recog_args.tgt_lang)
+            logging.debug('<sos> index: ' + str(char_list.index(recog_args.tgt_lang)))
+            logging.debug('<sos> mark: ' + recog_args.tgt_lang)
             yseq = [[char_list.index(recog_args.tgt_lang)] for _ in six.moves.range(n_bb)]
         elif lang_ids is not None:
             # NOTE: used for evaluation during training
             yseq = [[lang_ids[b // recog_args.beam_size]] for b in six.moves.range(n_bb)]
         else:
-            logging.info('<sos> index: ' + str(self.sos))
-            logging.info('<sos> mark: ' + char_list[self.sos])
+            logging.debug('<sos> index: ' + str(self.sos))
+            logging.debug('<sos> mark: ' + char_list[self.sos])
             yseq = [[self.sos] for _ in six.moves.range(n_bb)]
 
         accum_odim_ids = [self.sos for _ in six.moves.range(n_bb)]
