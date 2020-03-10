@@ -65,6 +65,9 @@ class ChainerDataLoader(object):
             self.current_position = 0
         return ret
 
+    def __next__(self):
+        return self.next()
+
     def __iter__(self):
         """Implement iter function."""
         for batch in self.loader:
@@ -89,4 +92,5 @@ class ChainerDataLoader(object):
 
     def finalize(self):
         """Implement finalize function."""
-        del self.loader
+        if hasattr(self, "loader"):
+            del self.loader

@@ -337,7 +337,7 @@ def make_batchset(data, batch_size=0, max_length_in=float("inf"), max_length_out
             count = "frame"
         else:
             raise ValueError(f"cannot detect `count` manually set one of {BATCH_COUNT_CHOICES}")
-        logging.info(f"count is auto detected as {count}")
+        logging.debug(f"count is auto detected as {count}")
 
     if count != "seq" and batch_sort_key == "shuffle":
         raise ValueError(f"batch_sort_key=shuffle is only available if batch_count=seq")
@@ -356,7 +356,7 @@ def make_batchset(data, batch_size=0, max_length_in=float("inf"), max_length_out
         # sort it by input lengths (long to short)
         sorted_data = sorted(d.items(), key=lambda data: int(
             data[1][batch_sort_key][batch_sort_axis]['shape'][0]), reverse=not shortest_first)
-        logging.info('# utts: ' + str(len(sorted_data)))
+        logging.debug('# utts: ' + str(len(sorted_data)))
         if count == "seq":
             batches = batchfy_by_seq(
                 sorted_data,
@@ -393,7 +393,7 @@ def make_batchset(data, batch_size=0, max_length_in=float("inf"), max_length_out
     # for debugging
     if num_batches > 0:
         batches = batches[:num_batches]
-    logging.info('# minibatches: ' + str(len(batches)))
+    logging.debug('# minibatches: ' + str(len(batches)))
 
     # batch: List[List[Tuple[str, dict]]]
     return batches

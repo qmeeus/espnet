@@ -1,4 +1,6 @@
+import logging
 import torch
+import operator
 from chainer import training
 from chainer.training import extensions, triggers
 from tensorboardX import SummaryWriter
@@ -20,16 +22,20 @@ from espnet.utils.training.tensorboard_logger import TensorboardLogger
 
 class CustomTrainer:
 
-    def __init__(self, args, model, optimizer, training_set, validation_set, device, valid_json=None, load_cv=None):
+    def __init__(self, args, model, optimizer, training_set, validation_set, 
+                 converter, device, valid_json=None, load_cv=None):
 
         self.epochs = args.epochs
         self.outdir = args.outdir
         self.resume = args.resume
+        self.device = device
         
         self.model = model
         self.optimizer = optimizer
         self.training_set = training_set
         self.validation_set = validation_set
+
+        self.converter = converter
 
         self.updater = CustomUpdater(
             model, args.grad_clip, training_set, self.optimizer,
@@ -38,7 +44,8 @@ class CustomTrainer:
         )
 
         self.evaluator = CustomEvaluator(
-            model, training_set, model.reporter, device, args.ngpu)
+            model, training_set, model.reporter, device, args.ngpu
+        )
 
         self.trainer = training.Trainer(
             self.updater, (args.epochs, 'epoch'), out=args.outdir
@@ -85,17 +92,18 @@ class CustomTrainer:
                 reverse=True
             )
 
-            if hasattr(model, "module"):
+            if hasattr(self.model, "module"):
                 att_vis_fn = self.model.module.calculate_all_attentions
                 plot_class = self.model.module.attention_plot_class
             
             else:
-                att_vis_fn = model.calculate_all_attentions
-                plot_class = model.attention_plot_class
+                att_vis_fn = self.model.calculate_all_attentions
+                plot_class = self.model.attention_plot_class
             
             att_reporter = plot_class(
                 att_vis_fn, data, args.outdir + "/att_ws",
-                converter=self.converter, transform=load_cv, device=self.device)
+                converter=self.converter, transform=load_cv, device=self.device
+            )
             
             self.add_extension(att_reporter, trigger=(1, 'epoch'))
 
@@ -105,7 +113,7 @@ class CustomTrainer:
         report_keys = [
                 'epoch', 'iteration', 'main/loss', 'main/loss_ctc', 'main/loss_att',
                 'validation/main/loss', 'validation/main/loss_ctc', 'validation/main/loss_att',
-                'main/acc', 'validation/main/acc', 'main/cer_ctc', 'validation/main/cer_ctc',
+                'main/accuracy', 'validation/main/accuracy', 'main/cer_ctc', 'validation/main/cer_ctc',
                 'elapsed_time'
             ]
 
@@ -116,7 +124,7 @@ class CustomTrainer:
     
         acc_plot_keys, cer_plot_keys = (
             [f'main/{metric}', f'validation/main/{metric}'] 
-            for metric in ('acc', 'cer_ctc')
+            for metric in ('accuracy', 'cer_ctc')
         )
 
         # Resume from a snapshot
@@ -138,7 +146,7 @@ class CustomTrainer:
             cer_plot_keys.extend(report_keys_cer_ctc)
 
         # Make a plot for training and validation values
-        for keys, metric in zip([loss_plot_keys, acc_plot_keys, cer_plot_keys], ['loss', 'acc', 'cer']):
+        for keys, metric in zip([loss_plot_keys, acc_plot_keys, cer_plot_keys], ['loss', 'accuracy', 'cer']):
             self.add_extension(
                 extensions.PlotReport(keys, 'epoch', file_name=f'{metric}.png')
             )
@@ -158,7 +166,7 @@ class CustomTrainer:
         if args.mtl_mode != 'ctc':
             self.add_extension(
                 snapshot_object(self.model, 'model.acc.best'), 
-                trigger=triggers.MaxValueTrigger('validation/main/acc')
+                trigger=triggers.MaxValueTrigger('validation/main/accuracy')
             )
 
         # save snapshot which contains model and optimizer states
@@ -176,7 +184,7 @@ class CustomTrainer:
 
             if args.criterion == 'acc' and args.mtl_mode != 'ctc':
 
-                best_acc_trigger = CompareValueTrigger('validation/main/acc', operator.gt)
+                best_acc_trigger = CompareValueTrigger('validation/main/accuracy', operator.gt)
 
                 self.add_extension(
                     restore_snapshot(self.model, args.outdir + '/model.acc.best', load_fn=torch_load), 

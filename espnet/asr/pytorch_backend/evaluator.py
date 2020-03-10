@@ -1,4 +1,6 @@
+import copy
 from chainer import reporter as reporter_module
+import torch
 from torch.nn.parallel import data_parallel
 from espnet.utils.torch_utils import _recursive_to
 from espnet.utils.training.evaluator import BaseEvaluator

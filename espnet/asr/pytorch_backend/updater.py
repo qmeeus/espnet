@@ -48,7 +48,7 @@ class CustomUpdater(StandardUpdater):
         epoch = train_iter.epoch
 
         # Get the next batch (a list of json files)
-        batch = train_iter.next()
+        batch = next(train_iter)
         # self.iteration += 1 # Increase may result in early report, which is done in other place automatically.
         x = _recursive_to(batch, self.device)
         is_new_epoch = train_iter.epoch != epoch
@@ -84,7 +84,7 @@ class CustomUpdater(StandardUpdater):
         # compute the gradient norm to check if it is normal or not
         grad_norm = torch.nn.utils.clip_grad_norm_(
             self.model.parameters(), self.grad_clip_threshold)
-        logging.info('grad norm={}'.format(grad_norm))
+        logging.debug('grad norm={}'.format(grad_norm))
         if math.isnan(grad_norm):
             logging.warning('grad norm is nan. Do not update model.')
         else:
