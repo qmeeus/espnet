@@ -3,19 +3,19 @@
 
 # general configuration
 backend=pytorch
-stage=4       # start from -1 if you need to start from data download
+stage=4         # start from -1 if you need to start from data download
 stop_stage=100
-ngpu=1         # number of gpus ("0" uses cpu, otherwise use gpu)
+ngpu=1          # number of gpus ("0" uses cpu, otherwise use gpu)
 debugmode=1
-dumpdir=dump   # directory to dump full features
-N=0            # number of minibatches to be used (mainly for debugging). "0" uses all minibatches.
-verbose=1      # verbose option
-resume=        # Resume the training from snapshot
+dumpdir=dump    # directory to dump full features
+N=0             # number of minibatches to be used (mainly for debugging). "0" uses all minibatches.
+verbose=1       # verbose option
+resume=         # Resume the training from snapshot
 
 # feature configuration
 do_delta=false
 
-train_config=conf/train_vggbgrup_mtalpha1.0.yaml
+train_config=conf/train_mtlalpha0.1.yaml
 lm_config=
 decode_config=conf/decode.yaml
 

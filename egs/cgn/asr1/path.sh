@@ -8,7 +8,7 @@ export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$CUDNN_PATH/lib64:/.singularity.d/libs
 export CFLAGS="-I$CUDA_HOME/include $CFLAGS"
 export CUDA_PATH=$CUDA_HOME
 
-PROJECT_ROOT=/users/spraak/spch/prog/spch/ESPnet
+PROJECT_ROOT=/users/spraak/qmeeus/spchdisk/repos/espnet
 KALDI_ROOT=$PROJECT_ROOT/tools/kaldi
 
 # Setup kaldi environment
@@ -26,18 +26,12 @@ fi
 
 # Locale and encoding for python
 export LC_ALL=C
+export LC_CTYPE=C
 export PYTHONIOENCODING=UTF-8
 export OMP_NUM_THREADS=1
 
 # Add necessary libraries to LD_LIBRARY_PATH
 export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:$PROJECT_ROOT/tools/chainer_ctc/ext/warp-ctc/build
-
-# Setup environment
-if [ -e $PROJECT_ROOT/tools/venv/etc/profile.d/conda.sh ]; then
-    source $PROJECT_ROOT/tools/venv/etc/profile.d/conda.sh && conda deactivate && conda activate
-else
-    source $PROJECT_ROOT/tools/venv/bin/activate
-fi
 
 # Add utils and espnet specific binaries to the path
 export PATH=$PROJECT_ROOT/utils:$PROJECT_ROOT/espnet/bin:$PATH
