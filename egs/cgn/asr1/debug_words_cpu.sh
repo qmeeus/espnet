@@ -12,13 +12,11 @@ set -o pipefail
 # cd ../../..
 # python espnet/data/dataset.py
 
-exp="${2:-train_s__pytorch_vggblstmp_words_mtalpha0.1}"
-
-export CUDA_LAUNCH_BLOCKING=1
+exp="${2:-train_s__pytorch_vggblstmp_words_mtalpha0.1_cpu}"
 
 asr_train.py \
- --config conf/train_mtlalpha0.5_sm.yaml \
- --ngpu 1 \
+ --config conf/train_mtlalpha0.5.yaml \
+ --ngpu 0 \
  --backend pytorch \
  --outdir exp/$exp/results \
  --tensorboard-dir tensorboard/$exp \

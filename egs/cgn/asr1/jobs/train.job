@@ -1,6 +1,6 @@
 Universe            = vanilla
 
-NiceUser            = false
+NiceUser            = true
 RequestCpus         = 1
 RequestMemory       = 8G
 +RequestWallTime    = 100000
@@ -12,8 +12,8 @@ Requirements        = ( CUDAGlobalMemoryMb > 8192 )
 # ( CUDACapability >= 3.5 )
 
 Initialdir          = /esat/spchdisk/scratch/qmeeus/repos/espnet/egs/cgn/asr1
-Executable          = ./debug_words.sh 
-Arguments           = --tag $exp
+Executable          = ./sg_run.sh 
+Arguments           = train.sh --tag $exp $args
 
 Notification        = Error
 Log                 = outputs/$exp.log

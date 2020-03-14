@@ -34,6 +34,7 @@ cgn_root=/esat/spchdisk/scratch/qmeeus/data/cgn/preprocessed
 lang="vl"
 comp="o;k"
 decodecomp="o;k"  # ;l;j;m;n;g;f;b;h;a;i
+dict=data/lang_1char/train_s__units.txt
 
 # exp tag
 tag="" # tag for managing experiments.
@@ -41,4 +42,5 @@ tag="" # tag for managing experiments.
 # datasets
 train_set="train_s_"
 train_dev="dev_s"
-
+train_json=dump/$train_set/deltafalse/pos_tags.json
+valid_json=dump/$train_dev/deltafalse/pos_tags.json
