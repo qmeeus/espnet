@@ -13,10 +13,10 @@ sampling-probability: 0.0
 
 # encoder related
 etype: blstmp     # encoder architecture type
-elayers: 1
+elayers: 2
 eunits: 160
 eprojs: 160
-subsample: "2_2" # skip every n frame from input to nth layers
+subsample: "1_2_2" # skip every n frame from input to nth layers
 # decoder related
 dlayers: 1
 dunits: 100
