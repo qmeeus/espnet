@@ -244,7 +244,7 @@ class E2E(nn.Module):
         cer_ctc, cer, wer = (
             self.ctc.compute_metrics(enc_out, enc_lens, target, self.char_list)
             if self.mtlalpha == 0 or self.char_list is None 
-            else [torch.tensor(float('nan')).type_as(outputs)] * 3
+            else torch.tensor([float('nan')] * 3).type_as(enc_out)
         )
 
         return cer_ctc, cer, wer
