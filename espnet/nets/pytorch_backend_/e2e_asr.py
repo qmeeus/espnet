@@ -6,19 +6,12 @@
 
 """RNN sequence-to-sequence speech recognition model (pytorch)."""
 
-from __future__ import division
-
 import argparse
 import logging
 import math
 import os
-
-import editdistance
-
 import numpy as np
-import six
 from collections import OrderedDict
-from itertools import groupby
 
 import torch
 import torch.nn as nn
@@ -31,9 +24,6 @@ from espnet.nets.pytorch_backend_.rnn.encoders_ import encoder_for
 from espnet.nets.e2e_asr_common import label_smoothing_dist
 from espnet.nets.pytorch_backend.initialization import lecun_normal_init_parameters
 from espnet.nets.pytorch_backend.nets_utils import get_subsample
-from espnet.nets.scorers.ctc import CTCPrefixScorer
-
-CTC_LOSS_THRESHOLD = 10000
 
 
 class E2E(nn.Module):
@@ -164,22 +154,19 @@ class E2E(nn.Module):
         # weight initialization
         self.init_weights()
 
-        # options for beam search
-        if args.report_cer or args.report_wer:
-            self.recog_args = argparse.Namespace()
-            for arg in ("beam_size", "penalty", "ctc_weight", "maxlenratio", "minlenratio", 
-                        "lm_weight", 'rnnlm', 'nbest', 'sym_space', 'sym_blank'):
-                setattr(self.recog_args, getattr(args, arg))
+        # # options for beam search
+        # if args.report_cer or args.report_wer:
+        #     self.recog_args = argparse.Namespace()
+        #     for arg in ("beam_size", "penalty", "ctc_weight", "maxlenratio", "minlenratio", 
+        #                 "lm_weight", 'rnnlm', 'nbest', 'sym_space', 'sym_blank'):
+        #         setattr(self.recog_args, getattr(args, arg))
             
-            self.report_cer = args.report_cer
-            self.report_wer = args.report_wer
+        #     self.report_cer = args.report_cer
+        #     self.report_wer = args.report_wer
 
-        else:
-            self.report_cer = False
-            self.report_wer = False
-
-        self.rnnlm = None
-        self.logzero = -1e10
+        # else:
+        #     self.report_cer = False
+        #     self.report_wer = False
 
     def init_weights(self):
         """Initialize weight like chainer.

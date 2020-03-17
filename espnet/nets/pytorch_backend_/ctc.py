@@ -2,6 +2,7 @@ import logging
 
 import numpy as np
 from itertools import groupby
+import editdistance
 
 import torch
 import torch.nn as nn
@@ -98,76 +99,72 @@ class CTC(torch.nn.Module):
 
         # 1. compute cer without beam search
 
-
         map_func = lambda i: target_dict[i]
-        ignore = lambda i: i != self.ignore_id
+        ignore_id = lambda i: i != self.ignore_id
+        ignore_blank = lambda t: t != self.blank
 
-        cers = []        
+        cer_scores = torch.zeros(*outputs.size()[:-1]).type_as(outputs)
         for i, y_pred in enumerate(predictions):
             y_pred = torch.unique_consecutive(y_pred[0])
             y_true = target[i]
 
             seq_pred, seq_true = (
-                map(list, (map(map_func, filter(ignore, y)) for y in (y_pred, y_true)))
+                map(list, (                                 # Output is a list
+                    filter(ignore_blank, map(               # Remove blank tokens
+                        map_func, filter(ignore_id, y)      # Remove padding and convert to target
+                    )) for y in (y_pred, y_true)
+                ))
             )
 
-            str_pred, str_true = (
-                "".join(seq).replace(self.space, ' ').replace(self.blank, '')
-                for seq in (seq_pred, seq_true)
-            )
+            if seq_true:
+                cer_scores[i] = editdistance.eval(seq_pred, seq_true) / len(seq_true)
 
-            hyp_chars, ref_chars = (
-                string.replace(' ', '') for string in (str_pred, str_true)
-            )
+        cer_ctc = cer_scores.mean()
 
-            if ref_chars:
-                cers.append(editdistance.eval(hyp_chars, ref_chars) / len(ref_chars))
+        # # 2. compute cer/wer
 
-        cer_ctc = torch.tensor(cers).type_as(outputs).mean() if cers else None
+        # if self.training or not (self.report_cer or self.report_wer):
+        #     cer, wer = torch.zeros(2).type_as(outputs)
 
-        # 2. compute cer/wer
+        # else:
+        #     lpz = self.softmax(outputs) if self.recog_args.ctc_weight > 0.0 else None
 
-        if self.training or not (self.report_cer or self.report_wer):
-            cer, wer = (0,) * 2
-            # oracle_cer, oracle_wer = 0.0, 0.0
-        else:
-            if self.recog_args.ctc_weight > 0.0:
-                lpz = self.ctc.log_softmax(outputs).data
-            else:
-                lpz = None
+        #     word_eds, word_ref_lens, char_eds, char_ref_lens = [], [], [], []
+        #     nbest_hyps = self.decoder.recognize_beam_batch(
+        #         outputs, output_lengths, lpz,
+        #         self.recog_args, self.char_list,
+        #         self.rnnlm)
+        #     # remove <sos> and <eos>
+        #     y_hats = [nbest_hyp[0]['yseq'][1:-1] for nbest_hyp in nbest_hyps]
+        #     for i, y_hat in enumerate(y_hats):
+        #         y_true = target[i]
 
-            word_eds, word_ref_lens, char_eds, char_ref_lens = [], [], [], []
-            nbest_hyps = self.decoder.recognize_beam_batch(
-                outputs, output_lengths, lpz,
-                self.recog_args, self.char_list,
-                self.rnnlm)
-            # remove <sos> and <eos>
-            y_hats = [nbest_hyp[0]['yseq'][1:-1] for nbest_hyp in nbest_hyps]
-            for i, y_hat in enumerate(y_hats):
-                y_true = target[i]
+        #         seq_hat = [self.char_list[int(idx)] for idx in y_hat if int(idx) != -1]
+        #         seq_true = [self.char_list[int(idx)] for idx in y_true if int(idx) != -1]
+        #         seq_hat_text = "".join(seq_hat).replace(self.recog_args.space, ' ')
+        #         seq_hat_text = seq_hat_text.replace(self.recog_args.blank, '')
+        #         seq_true_text = "".join(seq_true).replace(self.recog_args.space, ' ')
 
-                seq_hat = [self.char_list[int(idx)] for idx in y_hat if int(idx) != -1]
-                seq_true = [self.char_list[int(idx)] for idx in y_true if int(idx) != -1]
-                seq_hat_text = "".join(seq_hat).replace(self.recog_args.space, ' ')
-                seq_hat_text = seq_hat_text.replace(self.recog_args.blank, '')
-                seq_true_text = "".join(seq_true).replace(self.recog_args.space, ' ')
+        #         hyp_words = seq_hat_text.split()
+        #         ref_words = seq_true_text.split()
+        #         word_eds.append(editdistance.eval(hyp_words, ref_words))
+        #         word_ref_lens.append(len(ref_words))
+        #         hyp_chars = seq_hat_text.replace(' ', '')
+        #         ref_chars = seq_true_text.replace(' ', '')
+        #         char_eds.append(editdistance.eval(hyp_chars, ref_chars))
+        #         char_ref_lens.append(len(ref_chars))
 
-                hyp_words = seq_hat_text.split()
-                ref_words = seq_true_text.split()
-                word_eds.append(editdistance.eval(hyp_words, ref_words))
-                word_ref_lens.append(len(ref_words))
-                hyp_chars = seq_hat_text.replace(' ', '')
-                ref_chars = seq_true_text.replace(' ', '')
-                char_eds.append(editdistance.eval(hyp_chars, ref_chars))
-                char_ref_lens.append(len(ref_chars))
+        #     wer = float(sum(word_eds)) / sum(word_ref_lens)
+        #     cer = float(sum(char_eds)) / sum(char_ref_lens)
 
-            wer = float(sum(word_eds)) / sum(word_ref_lens)
-            cer = float(sum(char_eds)) / sum(char_ref_lens)
+        # # HACK
+        # wer, cer, cer_ctc = (
+        #     torch.tensor(m).type_as(outputs) for m in (wer, cer, cer_ctc)
+        # )
 
-        # HACK
-        wer, cer, cer_ctc = (
-            torch.tensor(m).type_as(outputs) for m in (wer, cer, cer_ctc)
-        )
+        cer, wer = torch.zeros(2).type_as(outputs)
+
+        return cer_ctc, cer, wer
 
 
 def ctc_for(args, output_dim, reduce=True):
