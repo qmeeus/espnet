@@ -318,6 +318,11 @@ def main(cmd_args):
     # train
     logging.info('backend = ' + args.backend)
 
+    if True:
+        from espnet.mtl.train import train
+        train(args)
+        return
+
     if args.num_spkrs == 1:
         if args.backend == "chainer":
             from espnet.asr.chainer_backend.asr import train

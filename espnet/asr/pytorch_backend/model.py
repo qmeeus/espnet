@@ -63,7 +63,7 @@ class ASRModel(pl.LightningModule):
     def val_dataloader(self):
         return self.dataloader("validation")
 
-    def get_optimizer(model, args):
+    def get_optimizer(self, model, args):
         opt = self.optimizer_name
         if opt == "adadelta":
             return Adadelta(

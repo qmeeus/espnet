@@ -74,6 +74,7 @@ class ASRDataset(Dataset):
         for output in metadatum["output"]:
             tokenids = list(map(int, output["tokenid"].split()))
             sample[output["name"]] = torch.LongTensor(tokenids)
+            sample[f"{output['name']}_length"] = len(tokenids)
         return sample
 
     def get_data(self, filepath, key):
@@ -100,7 +101,7 @@ class ASRDataset(Dataset):
             else:
                 raise ValueError(f"Unexpected element in batch: {k}")
         # espnet compatibility: return tuple instead of dict
-        batch = batch["input1"], batch["input1_length"], batch["target1"]
+        batch = batch["input1"], batch["input1_length"], batch["target1"], batch["target1_length"]
         if self.sort_by_length:
             batch = self.sort_batch(*batch)
         return batch
@@ -118,11 +119,11 @@ class ASRDataset(Dataset):
             padded_tensors[i, :] = pad(tensor, padding, mode='constant', value=padding_value)
         return padded_tensors
 
-    def sort_batch(self, X, Xlens, y):
+    def sort_batch(self, *batch):
+        Xlens = batch[1]
         Xlens, sort_order = Xlens.sort(descending=True)
-        X = X.index_select(0, sort_order)
-        y = y.index_select(0, sort_order)
-        return X, Xlens, y
+        batch = [t.index_select(0, sort_order) for t in batch]
+        return batch
 
     @classmethod
     def from_json(cls, path, **kwargs):

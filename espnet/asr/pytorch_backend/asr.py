@@ -52,7 +52,7 @@ if sys.version_info[0] == 2:
 else:
     from itertools import zip_longest as zip_longest    
 
-DEBUG_MODEL = True
+DEBUG_MODEL = False
 
 def build_model(list_input_dim, output_dim, args):
 

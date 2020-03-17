@@ -255,8 +255,12 @@ class E2E(ASRInterface, torch.nn.Module):
         else:
             hs_pad, hlens = xs_pad, ilens
 
+        logging.warning(f"Input size: {hs_pad.size()} Output size: {ys_pad.size()}")
+
         # 1. Encoder
         hs_pad, hlens, _ = self.enc(hs_pad, hlens)
+
+        logging.warning(f"Enc out: {hs_pad.size()}")
 
         # 2. Loss
         losses = self.compute_loss(hs_pad, hlens, ys_pad)

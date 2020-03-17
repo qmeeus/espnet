@@ -72,6 +72,7 @@ class CTC(torch.nn.Module):
         ys_true = ys_true[ys_true != self.ignore_id].contiguous()
         olens = (ys_pad != self.ignore_id).sum(-1)
         ys_hat = self.forward(hs_pad)
+        logging.warning(f"CTC out: {ys_hat.size()}")
 
         # get length info
         logging.debug(self.__class__.__name__ + ' input lengths:  ' + ''.join(str(hlens).split('\n')))
