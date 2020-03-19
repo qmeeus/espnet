@@ -26,12 +26,9 @@ fi
 
 # Locale and encoding for python
 export LC_ALL=C
-export LC_CTYPE=C
+# export LC_CTYPE=C
 export PYTHONIOENCODING=UTF-8
 export OMP_NUM_THREADS=1
-
-# Add necessary libraries to LD_LIBRARY_PATH
-export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:$PROJECT_ROOT/tools/chainer_ctc/ext/warp-ctc/build
 
 # Add utils and espnet specific binaries to the path
 export PATH=$PROJECT_ROOT/utils:$PROJECT_ROOT/espnet/bin:$PATH
