@@ -4,7 +4,7 @@ NiceUser            = true
 RequestCpus         = 1
 RequestMemory       = 8G
 +RequestWallTime    = 100000
-Request_GPUs	    = 1
+Request_GPUs	    = $gpus
 Requirements        = ( CUDAGlobalMemoryMb > 8192 ) && ( HasSingularity ) && ( CUDACapability >= 3.5 )
 
 Initialdir          = /esat/spchdisk/scratch/qmeeus/repos/espnet/egs/cgn/asr1

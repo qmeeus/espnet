@@ -1,0 +1,19 @@
+Universe            = vanilla
+
+NiceUser            = {nice_user}
+RequestCpus         = {ncpus}
+RequestMemory       = {mem}
++RequestWallTime    = {duration}
+Request_GPUs	    = {ngpus}
+Requirements        = {constraints}
+
+Initialdir          = {project_root} 
+Executable          = {command} 
+Arguments           = {command_args}
+
+Notification        = Error
+Log                 = {logfile}
+Output              = {stdout} 
+Error               = {stderr}
+
+Queue {njobs}

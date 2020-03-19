@@ -26,6 +26,7 @@ feat_dt_dir=dump/${train_dev}/deltafalse
 asr_train.py \
   --config ${train_config} \
   --ngpu ${ngpu} \
+  --gpus ${gpus} \
   --backend ${backend} \
   --outdir ${expdir}/results \
   --tensorboard-dir tensorboard/${expname} \

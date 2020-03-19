@@ -11,12 +11,18 @@ import os
 import random
 import subprocess
 import sys
+import re
 
 import configargparse
 import numpy as np
 import torch
 from espnet.utils.cli_utils import strtobool, count_gpus
 from espnet.utils.training.batchfy import BATCH_COUNT_CHOICES
+
+def int_or_list_of_ints(s):
+    if re.match(r"\[\d(?:\,\d)*\]", s):
+        return [int(i) for i in eval(s)]
+    return int(s)
 
 
 # NOTE: you need this func to generate our sphinx doc
@@ -34,8 +40,11 @@ def get_parser(parser=None, required=True):
     parser.add('--config3', is_config_file=True,
                help='third config file path that overwrites the settings in `--config` and `--config2`.')
 
+    parser.add_argument("--gpus", default=0, type=int_or_list_of_ints, 
+                        help="# GPUS (for pytorch_lightning trainer)")
     parser.add_argument('--ngpu', default=None, type=int,
                         help='Number of GPUs. If not given, use all visible devices')
+    parser.add_argument('--v1', action="store_true")
     parser.add_argument('--train-dtype', default="float32",
                         choices=["float16", "float32", "float64", "O0", "O1", "O2", "O3"],
                         help='Data type for training (only pytorch backend). '
@@ -318,7 +327,7 @@ def main(cmd_args):
     # train
     logging.info('backend = ' + args.backend)
 
-    if True:
+    if not args.v1:
         from espnet.mtl.train import train
         train(args)
         return

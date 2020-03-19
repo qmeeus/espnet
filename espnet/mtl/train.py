@@ -68,8 +68,8 @@ def train(args):
     logger = TensorBoardLogger(save_dir=args.tensorboard_dir)
 
     trainer = Trainer(
-        max_epochs=2,
-        gpus=1, 
+        max_epochs=1,
+        gpus=args.gpus, 
         log_gpu_memory='all', 
         # overfit_pct=.01, 
         profiler=True,

@@ -4,7 +4,7 @@ NiceUser            = true
 RequestCpus         = 1
 RequestMemory       = 8G
 +RequestWallTime    = 100000
-Request_GPUs	    = $gpus
+Request_GPUs	    = $ngpu
 Requirements        = ( CUDAGlobalMemoryMb > 8192 ) 
 
 #( HasSingularity ) && \
@@ -13,7 +13,7 @@ Requirements        = ( CUDAGlobalMemoryMb > 8192 )
 
 Initialdir          = /esat/spchdisk/scratch/qmeeus/repos/espnet/egs/cgn/asr1
 Executable          = ./sg_run.sh 
-Arguments           = train.sh --tag $exp $args
+Arguments           = train_wordpieces.sh --tag $exp $args --ngpu $ngpu
 
 Notification        = Error
 Log                 = outputs/$exp.log

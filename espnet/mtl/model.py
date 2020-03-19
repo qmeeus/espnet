@@ -2,6 +2,7 @@ import logging
 import torch
 import pytorch_lightning as pl
 from copy import deepcopy
+from itertools import chain
 from collections import OrderedDict
 from torch.utils.data import DataLoader
 from torch.optim import Adam, Adadelta
@@ -28,16 +29,16 @@ class ASRModel(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         frames, frame_lengths, targets, target_lengths = batch
         outputs = self.forward(frames, frame_lengths, targets)
-        loss, loss_ctc, loss_att = self.model.compute_loss(outputs, targets, target_lengths)
+        losses = self.model.compute_loss(outputs, targets, target_lengths)
         
         if self.trainer.use_dp or self.trainer.use_ddp2:
-            losses = loss, loss_ctc, loss_att = (
-                tensor.unsqueeze(0) for tensor in (loss, loss_ctc, loss_att)
-            )
+            losses = tuple(tensor.unsqueeze(0) for tensor in losses)
 
         tqdm_dict = dict(
-            *zip(map(lambda s: f"train_{s}", self.model.LOSS_NAMES), losses)
+            zip(map(lambda s: f"train_{s}", self.model.LOSS_NAMES), losses)
         )
+
+        loss, loss_ctc, loss_att = losses
 
         return OrderedDict(
             loss=loss,
@@ -53,10 +54,14 @@ class ASRModel(pl.LightningModule):
         losses = self.model.compute_loss(outputs, targets, target_lengths)
         metrics = self.model.compute_metrics(outputs, targets, target_lengths)
         
-        tqdm_dict = dict(
-            *zip(map(lambda s: f"val_{s}", self.model.LOSS_NAMES), losses), 
-            *zip(map(lambda s: f"val_{s}", self.model.METRIC_NAMES), metrics)
-        )
+        if self.trainer.use_dp or self.trainer.use_ddp2:
+            losses = (tensor.unsqueeze(0) for tensor in losses)
+            metrics = (tensor.unsqueeze(0) for tensor in metrics)
+
+        tqdm_dict = dict(chain(
+            zip(map(lambda s: f"val_{s}", self.model.LOSS_NAMES), losses), 
+            zip(map(lambda s: f"val_{s}", self.model.METRIC_NAMES), metrics)
+        ))
         
         return OrderedDict(
             **tqdm_dict,
@@ -68,9 +73,11 @@ class ASRModel(pl.LightningModule):
         if not outputs:
             return {}
 
+        metric_names = self.model.LOSS_NAMES + self.model.METRIC_NAMES
+
         metrics = {
             metric_name: torch.stack([x[metric_name] for x in outputs]).mean()
-            for metric_name in map(lambda s: f"val_{s}", self.model.METRICS)
+            for metric_name in map(lambda s: f"val_{s}", metric_names)
             if metric_name in outputs[0]
         }
 
