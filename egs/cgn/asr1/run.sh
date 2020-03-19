@@ -19,7 +19,7 @@ if [ $stage -le 0 ]; then
   echo "stage 0: prepare the data"
   # the script detects if a telephone comp is used and splits this into a separate set
   # later, studio and telephone speech can be combined for NNet training
-  bash -xe local/cgn_data_prep.sh ${datadir} ${lang} ${comp} ${decodecomp} ${train_set} ${train_dev} ${tag}
+  bash -xe local/cgn_data_prep.sh ${datadir} ${lang} ${comp} ${decodecomp} ${train_set} ${dev_set} ${tag}
 fi
 
 if [ ${stop_stage} -le 0 ]; then
@@ -31,14 +31,14 @@ fi
 #                                  PREPROCESSING
 # =======================================================================================
 feat_tr_dir=${dumpdir}/${train_set}/delta${do_delta}; mkdir -p ${feat_tr_dir}
-feat_dt_dir=${dumpdir}/${train_dev}/delta${do_delta}; mkdir -p ${feat_dt_dir}
+feat_dt_dir=${dumpdir}/${dev_set}/delta${do_delta}; mkdir -p ${feat_dt_dir}
 if [ ${stage} -le 1 ]; then
     ### Task dependent. You have to design training and dev sets by yourself.
     ### But you can utilize Kaldi recipes in most cases
     echo "stage 1: Feature Generation"
     fbankdir=fbank
     # Generate the fbank features; by default 80-dimensional fbanks with pitch on each frame
-    for x in ${train_set} ${train_dev}; do
+    for x in ${train_set} ${dev_set}; do
         steps/make_fbank_pitch.sh --cmd "$train_cmd" --nj 8 --write_utt2num_frames true \
             data/${x} exp/make_fbank/${x} ${fbankdir}
         utils/fix_data_dir.sh data/${x}
@@ -48,7 +48,7 @@ if [ ${stage} -le 1 ]; then
     cp -r data/$train_set data/$fulldata
 
     # make a dev set
-    utils/subset_data_dir.sh --first data/$fulldata 1000 data/${train_dev}
+    utils/subset_data_dir.sh --first data/$fulldata 1000 data/${dev_set}
     n=$(($(wc -l < data/$fulldata/text) - 1000))
     utils/subset_data_dir.sh --last data/$fulldata ${n} data/${train_set}
 
@@ -59,7 +59,7 @@ if [ ${stage} -le 1 ]; then
     dump.sh --cmd "$train_cmd" --nj 8 --do_delta ${do_delta} \
         data/${train_set}/feats.scp data/${train_set}/cmvn.ark exp/dump_feats/train ${feat_tr_dir}
     dump.sh --cmd "$train_cmd" --nj 8 --do_delta ${do_delta} \
-        data/${train_dev}/feats.scp data/${train_set}/cmvn.ark exp/dump_feats/dev ${feat_dt_dir}
+        data/${dev_set}/feats.scp data/${train_set}/cmvn.ark exp/dump_feats/dev ${feat_dt_dir}
 
 fi
 
@@ -89,7 +89,7 @@ if [ ${stage} -le 2 ]; then
     
     data2json.sh \
       --feat ${feat_dt_dir}/feats.scp \
-      data/${train_dev} ${dict} > ${feat_dt_dir}/data.json
+      data/${dev_set} ${dict} > ${feat_dt_dir}/data.json
 
 fi
 
@@ -131,7 +131,7 @@ if [ $stage -le 3 ]; then
 
 #   spm_encode \
 #     --model=${model_prefix}.model \
-#     --output_format=piece <(cat data/${train_dev}/text | cut -f2- -d" ") \
+#     --output_format=piece <(cat data/${dev_set}/text | cut -f2- -d" ") \
 #     | tr ' ' '\n' | sort | uniq | awk '{print $0 " " NR+1}' \
 #     >> $vocab
 
@@ -144,7 +144,7 @@ if [ $stage -le 3 ]; then
   data2json.sh \
     --feat ${feat_dt_dir}/feats.scp \
     --bpecode ${model_prefix}.model \
-    data/${train_dev} ${vocab} \
+    data/${dev_set} ${vocab} \
     > ${feat_dt_dir}/data_${model}_${vocab_size}.json
 
 fi

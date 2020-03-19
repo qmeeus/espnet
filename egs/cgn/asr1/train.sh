@@ -21,7 +21,7 @@ expdir=exp/${expname}
 mkdir -p ${expdir}
 
 feat_tr_dir=dump/${train_set}/deltafalse
-feat_dt_dir=dump/${train_dev}/deltafalse
+feat_dt_dir=dump/${dev_set}/deltafalse
 
 asr_train.py \
   --config ${train_config} \

@@ -33,22 +33,21 @@ recog_model=model.loss.best # set a model to be used for decoding: 'model.acc.be
 datadir=/users/spraak/spchdata/cgn
 cgn_root=/esat/spchdisk/scratch/qmeeus/data/cgn/preprocessed
 lang="vl"
-comp="o;k"
-decodecomp="o;k"
-dict=data/lang_1char/train_s_units.txt
-train_set="train_s"
-train_dev="dev_s"
 
+# comp="o;k"
+# decodecomp="o;k"
+# dict=data/lang_1char/train_s_units.txt
+# train_set="train_s"
+# dev_set="dev_s"
 
-# comp="o;k;l;j;m;n;g;f;b;h;a;i"
-# decodecomp="o;k;l;j;m;n;g;f;b;h;a;i"
-# dict=data/lang_1char/train_m_units.txt
-# train_set="train_m"
-# train_dev="dev_m"
+comp="o;k;l;j;m;n;g;f;b;h;a;i"
+decodecomp="o;k;l;j;m;n;g;f;b;h;a;i"
+train_set="train_m"
+dev_set="dev_m"
+dict=data/lang_1char/${train_set}_units.txt
+wpdict=data/lang_char/${train_set}_unigram_5000_units.txt
 
 # exp tag
 tag="s"             # tag for managing experiments.
 output_dir=""
 
-train_json=dump/$train_set/deltafalse/pos_tags.json
-valid_json=dump/$train_dev/deltafalse/pos_tags.json
