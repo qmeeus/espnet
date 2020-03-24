@@ -26,7 +26,7 @@ fi
 
 # Locale and encoding for python
 export LC_ALL=C
-# export LC_CTYPE=C
+export LC_CTYPE=C
 export PYTHONIOENCODING=UTF-8
 export OMP_NUM_THREADS=1
 

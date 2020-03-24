@@ -41,7 +41,6 @@ dev_features=dump/${dev_set}/deltafalse
 mkdir -p $output_dir
 
 asr_train.py \
-  --v1 \
   --config ${train_config} \
   --ngpu ${ngpu} \
   --backend pytorch \

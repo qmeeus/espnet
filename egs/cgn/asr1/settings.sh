@@ -1,6 +1,5 @@
 #!/bin/bash
 
-
 # general configuration
 backend=pytorch
 stage=0         # start from -1 if you need to start from data download
@@ -19,6 +18,7 @@ do_delta=false
 train_config=conf/train_mtlalpha0.1.yaml
 lm_config=
 decode_config=conf/decode.yaml
+exp_config=
 
 # # rnnlm related
 # use_wordlm=true     # false means to train/use a character LM
@@ -29,25 +29,35 @@ decode_config=conf/decode.yaml
 # decoding parameter
 recog_model=model.loss.best # set a model to be used for decoding: 'model.acc.best' or 'model.loss.best'
 
-# data
-datadir=/users/spraak/spchdata/cgn
-cgn_root=/esat/spchdisk/scratch/qmeeus/data/cgn/preprocessed
-lang="vl"
+# exp tag
+tag=                  # tag for managing experiments.
+output_dir=
+target="wordpieces"
+dataset_tag=".xs"
 
+# data
+cgn_root=/users/spraak/spchdata/cgn
+# cgn_root=/esat/spchdisk/scratch/qmeeus/data/cgn/preprocessed
+lang="vl"
+vocab_size=
+
+# tag="xs"
 # comp="o;k"
 # decodecomp="o;k"
-# dict=data/lang_1char/train_s_units.txt
+# train_set="train_xs"
+# dev_set="dev_xs"
+# test_set="test_xs"
+
+# tag="s"
+# comp="i;j;k;l;m;n;o"
+# decodecomp="i;j;k;l;m;n;o"
 # train_set="train_s"
 # dev_set="dev_s"
+# test_set="test_s"
 
-comp="o;k;l;j;m;n;g;f;b;h;a;i"
-decodecomp="o;k;l;j;m;n;g;f;b;h;a;i"
+# tag="m"
+# comp="o;k;l;j;m;n;g;f;b;h;a;i"
+# decodecomp="o;k;l;j;m;n;g;f;b;h;a;i"
 train_set="train_m"
 dev_set="dev_m"
-dict=data/lang_1char/${train_set}_units.txt
-wpdict=data/lang_char/${train_set}_unigram_5000_units.txt
-
-# exp tag
-tag="s"             # tag for managing experiments.
-output_dir=""
-
+test_set="test_m"

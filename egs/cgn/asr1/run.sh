@@ -1,4 +1,4 @@
-#!/bin/bash -xe
+#!/bin/bash -ex
 
 # Copyright 2017 Johns Hopkins University (Shinji Watanabe)
 #  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
@@ -19,7 +19,8 @@ if [ $stage -le 0 ]; then
   echo "stage 0: prepare the data"
   # the script detects if a telephone comp is used and splits this into a separate set
   # later, studio and telephone speech can be combined for NNet training
-  bash -xe local/cgn_data_prep.sh ${datadir} ${lang} ${comp} ${decodecomp} ${train_set} ${dev_set} ${tag}
+  local/cgn_data_prep.sh ${datadir} ${lang} ${comp} ${decodecomp} ${train_set} ${dev_set} ${tag}
+
 fi
 
 if [ ${stop_stage} -le 0 ]; then
@@ -30,8 +31,6 @@ fi
 # =======================================================================================
 #                                  PREPROCESSING
 # =======================================================================================
-feat_tr_dir=${dumpdir}/${train_set}/delta${do_delta}; mkdir -p ${feat_tr_dir}
-feat_dt_dir=${dumpdir}/${dev_set}/delta${do_delta}; mkdir -p ${feat_dt_dir}
 if [ ${stage} -le 1 ]; then
     ### Task dependent. You have to design training and dev sets by yourself.
     ### But you can utilize Kaldi recipes in most cases
@@ -44,26 +43,65 @@ if [ ${stage} -le 1 ]; then
         utils/fix_data_dir.sh data/${x}
     done
 
-    fulldata="train+dev_$tag"
-    cp -r data/$train_set data/$fulldata
+fi
 
-    # make a dev set
-    utils/subset_data_dir.sh --first data/$fulldata 1000 data/${dev_set}
-    n=$(($(wc -l < data/$fulldata/text) - 1000))
-    utils/subset_data_dir.sh --last data/$fulldata ${n} data/${train_set}
+if [ ${stop_stage} -le 1 ]; then
+  echo "Reached stop stage, quitting..."
+  exit 0
+fi
+
+# =======================================================================================
+#                               TRAIN / DEV / TEST
+# =======================================================================================
+feat_tr_dir=${dumpdir}/${train_set}/delta${do_delta}; mkdir -p ${feat_tr_dir}
+feat_dt_dir=${dumpdir}/${dev_set}/delta${do_delta}; mkdir -p ${feat_dt_dir}
+feat_te_dir=${dumpdir}/${test_set}/delta${do_delta}; mkdir -p ${feat_te_dir}
+
+if [ ${stage} -le 2 ]; then
+    echo "stage 2: Dataset splits"
+
+    fulldata="data_${tag}_all"
+    train_dev="train+dev_${tag}"
+    cp -r data/$train_set data/$fulldata
+    # n=$(wc -l < data/$fulldata/text)
+    # ntest=$(python -c "print(int($n * .3))")
+    # ndev=$(python -c "print(int($n * .1))")
+    # ntrain=$(( $n - $ntest - $ndev ))
+
+    # echo "Subset sizes: TRAIN: $ntrain    DEV: $ndev    TEST: $ntest    TOTAL: $n"
+
+    # train / test split
+    utils/subset_data_dir_tr_cv.sh --cv-spk-percent 30 data/$fulldata data/$train_dev data/$test_set
+    # rm -r data/$fulldata
+
+    # train / dev split
+    utils/subset_data_dir_tr_cv.sh --cv-spk-percent 30 data/$train_dev data/$train_set data/$test_set
+    # rm -r data/train_dev
+
+    # # train / test split
+    # utils/subset_data_dir.sh --first data/$fulldata $ntest data/${test_set}
+    # utils/subset_data_dir.sh --last data/$fulldata $(( $n - $ntest )) data/${train_dev}
+    # # rm -r data/$fulldata
+
+    # # train / dev split
+    # utils/subset_data_dir.sh --first data/${train_dev} $ndev data/${dev_set}
+    # utils/subset_data_dir.sh --last data/${train_dev} $ntrain data/${train_set}
+    # # rm -r data/train_dev
 
     # compute global CMVN
     compute-cmvn-stats scp:data/${train_set}/feats.scp data/${train_set}/cmvn.ark
 
     # dump features
     dump.sh --cmd "$train_cmd" --nj 8 --do_delta ${do_delta} \
-        data/${train_set}/feats.scp data/${train_set}/cmvn.ark exp/dump_feats/train ${feat_tr_dir}
+      data/${train_set}/feats.scp data/${train_set}/cmvn.ark exp/dump_feats/train ${feat_tr_dir}
     dump.sh --cmd "$train_cmd" --nj 8 --do_delta ${do_delta} \
-        data/${dev_set}/feats.scp data/${train_set}/cmvn.ark exp/dump_feats/dev ${feat_dt_dir}
+      data/${dev_set}/feats.scp data/${train_set}/cmvn.ark exp/dump_feats/dev ${feat_dt_dir}
+    dump.sh --cmd "$train_cmd" --nj 8 --do_delta ${do_delta} \
+      data/${test_set}/feats.scp data/${train_set}/cmvn.ark exp/dump_feats/test ${feat_te_dir}
 
 fi
 
-if [ ${stop_stage} -le 1 ]; then
+if [ ${stop_stage} -le 2 ]; then
   echo "Reached stop stage, quitting..."
   exit 0
 fi
@@ -73,9 +111,9 @@ fi
 # =======================================================================================
 dict=data/lang_1char/${train_set}_units.txt
 echo "dictionary: ${dict}"
-if [ ${stage} -le 2 ]; then
+if [ ${stage} -le 3 ]; then
 
-    echo "stage 2: Dictionary and Json Data Preparation"
+    echo "stage 3: Dictionary and Json Data Preparation"
     mkdir -p data/lang_1char/
     echo "<unk> 1" > ${dict} # <unk> must be 1, 0 will be used for "blank" in CTC
     text2token.py -s 1 -n 1 data/${train_set}/text | cut -f 2- -d" " | tr " " "\n" \
@@ -91,9 +129,13 @@ if [ ${stage} -le 2 ]; then
       --feat ${feat_dt_dir}/feats.scp \
       data/${dev_set} ${dict} > ${feat_dt_dir}/data.json
 
+    data2json.sh \
+      --feat ${feat_te_dir}/feats.scp \
+      data/${test_set} ${dict} > ${feat_te_dir}/data.json
+
 fi
 
-if [ ${stop_stage} -le 2 ]; then
+if [ ${stop_stage} -le 3 ]; then
   echo "Reached stop stage, quitting..."
   exit 0
 fi
@@ -102,9 +144,9 @@ fi
 #                                    WORDPIECES
 # =======================================================================================
 
-if [ $stage -le 3 ]; then
+if [ $stage -le 4 ]; then
 
-  echo "Train wordpiece model"
+  echo "Stage 4: Train wordpiece model"
   model=unigram
   vocab_size=5000
   lang_dir=data/lang_char
@@ -147,9 +189,15 @@ if [ $stage -le 3 ]; then
     data/${dev_set} ${vocab} \
     > ${feat_dt_dir}/data_${model}_${vocab_size}.json
 
+  data2json.sh \
+    --feat ${feat_te_dir}/feats.scp \
+    --bpecode ${model_prefix}.model \
+    data/${test_set} ${vocab} \
+    > ${feat_te_dir}/data_${model}_${vocab_size}.json
+
 fi
 
-if [ ${stop_stage} -le 3 ]; then
+if [ ${stop_stage} -le 4 ]; then
   echo "Reached stop stage, quitting..."
   exit 0
 fi
@@ -168,9 +216,9 @@ fi
 expdir=exp/${expname}
 mkdir -p ${expdir}
 
-if [ ${stage} -le 4 ]; then
+if [ ${stage} -le 5 ]; then
 
-    echo "stage 4: Network Training"
+    echo "stage 5: Network Training"
     ${cuda_cmd} --gpu ${ngpu} ${expdir}/train.log \
         asr_train.py \
         --v1 \
@@ -191,7 +239,7 @@ if [ ${stage} -le 4 ]; then
 
 fi
 
-if [ ${stop_stage} -le 4 ]; then
+if [ ${stop_stage} -le 5 ]; then
   echo "Reached stop stage, quitting..."
   exit 0
 fi

@@ -1,12 +1,12 @@
 # network architecture
 # encoder related
-elayers: 12
-eunits: 2048
+elayers: 6 
+eunits: 256
 # decoder related
-dlayers: 6
-dunits: 2048
+dlayers: 3
+dunits: 256
 # attention related
-adim: 256
+adim: 128
 aheads: 4
 
 # hybrid CTC/attention

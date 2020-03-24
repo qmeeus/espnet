@@ -6,9 +6,11 @@ from bs4 import BeautifulSoup
 from tqdm import tqdm
 
 
-def get_annotation_files(tag_dir):
-    tag_files = list(tag_dir.glob("comp-k/vl/*.tag.gz"))
-    tag_files.extend(list(tag_dir.glob("comp-o/vl/*.tag.gz")))
+def get_annotation_files(tag_dir, comps, lang="vl"):
+    tag_files = []
+    for comp in comps:
+        tag_files.extend(list(tag_dir.glob(f"comp-{comp}/{lang}/*.tag.gz")))
+
     tag_files = dict(map(lambda v: (v.stem.replace(".tag", ""), v), tag_files))
     return tag_files
 
@@ -63,26 +65,27 @@ def make_target(jsonfile, tag_files, target_dict):
         metadata[i]["output"][0]["tokenid"] = " ".join(map(str, tokenids))
         metadata[i]["output"][0]["shape"] = [len(tokenids), len(target_dict)]
 
-    with open(jsonfile.parent.joinpath("pos_tags.json"), "w") as f:
+    newfile = jsonfile.parent.joinpath(f"data_pos_{len(target_dict)}.json")
+    with open(newfile, "w") as f:
         json.dump({"utts": dict(zip(keys, metadata))}, f)
 
-def main():
-
-    project_root = Path("~/spchdisk/repos/espnet/egs/cgn/asr1").expanduser()
-    data_root = Path("~/data/cgn/CDdata/CGN_V1.0_elda_ann/data").expanduser()
-    tag_frequencies = Path(data_root, "lexicon/freqlists/tagalph.frq")
-    tag_dir = data_root.joinpath("annot/xml/tag/")
-    json_train, json_valid = (
-        Path(project_root, f"dump/{subset}/deltafalse/data.json")
-        for subset in ("train_s_", "dev_s")
-    )
-
-    target_dict = build_dict(tag_frequencies, save_to=project_root.joinpath("data/pos_tags.txt"))
-    tag_files = get_annotation_files(tag_dir)
-    for jsonfile in (json_train, json_valid):
-        make_target(jsonfile, tag_files, target_dict)
+    return newfile
 
 
-if __name__ == '__main__':
-    main()
+datasets = ["train_s", "dev_s", "test_s", "train_m", "dev_m", "test_m"]
+comps = list("okljmngfbhai")
+project_root = Path("~/spchdisk/repos/espnet/egs/cgn/asr1").expanduser()
+data_root = Path("~/data/cgn/CDdata/CGN_V1.0_elda_ann/data").expanduser()
+tag_frequencies = Path(data_root, "lexicon/freqlists/tagalph.frq")
+tag_dir = data_root.joinpath("annot/xml/tag/")
+json_files = (
+    Path(project_root, f"dump/{subset}/deltafalse/data.json")
+    for subset in datasets
+)
+
+target_dict = build_dict(tag_frequencies, save_to=project_root.joinpath("data/pos_tags.txt"))
+tag_files = get_annotation_files(tag_dir, comps)
+for jsonfile in json_files:
+    output_file = make_target(jsonfile, tag_files, target_dict)
+    print(f"Saved {output_file}")
 

@@ -4,7 +4,7 @@ NiceUser            = {nice_user}
 RequestCpus         = {ncpus}
 RequestMemory       = {mem}
 +RequestWallTime    = {duration}
-Request_GPUs	    = {ngpus}
+Request_GPUs	    = {ngpu}
 Requirements        = {constraints}
 
 Initialdir          = {project_root} 

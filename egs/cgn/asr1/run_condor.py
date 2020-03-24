@@ -35,7 +35,7 @@ class CondorJob:
         parser.add_argument("--ncpus", default=1, type=int)
         parser.add_argument("--mem", default="8G", type=memory_type)
         parser.add_argument("--duration", default="100000", type=int)
-        parser.add_argument("--ngpus", default=1, type=int)
+        parser.add_argument("--ngpu", default=1, type=int)
         parser.add_argument("--project_root", default=Path(__file__).absolute().parent, type=Path)
         parser.add_argument("command", type=str)
         parser.add_argument("--output_dir", default="exp", type=Path)
@@ -92,11 +92,12 @@ class CondorJob:
         if self.dry_run:
             return
 
+        os.makedirs(self.output_dir, exist_ok=True)
+        
         if self.interactive:
             command.append("-interactive")
             os.system(" ".join(command))
         else:
-            os.makedirs(self.output_dir, exist_ok=True)
             self._process = subprocess.Popen(command)
 
     def _format_constraints(self):
@@ -129,8 +130,7 @@ class CondorJob:
         for opt, ext in zip(("logfile", "stdout", "stderr"), ("log", "out", "err")):
             self.options[opt] = Path(self.output_dir, f"condor.{ext}")
 
-        #self.options["command_args"] += f" --exp_name {exp_name} --tag {tag}"
-        self.options["command_args"] += f" --tag {tag} --output_dir {self.output_dir}"
+        self.options["command_args"] += f" --tag {tag} --output_dir {self.output_dir} --ngpu {self.options['ngpu']}"
 
 
 if __name__ == '__main__':
