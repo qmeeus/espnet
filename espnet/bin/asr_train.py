@@ -40,7 +40,7 @@ def get_parser(parser=None, required=True):
     parser.add('--config3', is_config_file=True,
                help='third config file path that overwrites the settings in `--config` and `--config2`.')
 
-    parser.add_argument("--gpus", default=0, type=int_or_list_of_ints, 
+    parser.add_argument("--gpus", default=1, type=int_or_list_of_ints, 
                         help="# GPUS (for pytorch_lightning trainer)")
     parser.add_argument('--ngpu', default=None, type=int,
                         help='Number of GPUs. If not given, use all visible devices')
