@@ -49,6 +49,7 @@ def train(args):
     output_dim = training_set.output_dim[0]
     
     # HACK
+    args.epochs = 100
     args.shuffle = True
     args.batch_size = 64
     args.num_workers = 10
@@ -68,10 +69,10 @@ def train(args):
     logger = TensorBoardLogger(save_dir=args.tensorboard_dir)
 
     trainer = Trainer(
-        max_epochs=1,
+        max_epochs=args.epochs,
         gpus=args.gpus, 
         log_gpu_memory='all', 
-        # overfit_pct=.01, 
+        # overfit_pct=.1, 
         profiler=True,
         logger=logger
     )
