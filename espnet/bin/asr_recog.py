@@ -35,6 +35,7 @@ def get_parser():
 
     parser.add_argument('--ngpu', type=int, default=0,
                         help='Number of GPUs')
+    parser.add_argument('--max-test-size', type=int, default=0, help="Limit the number of test examples")
     parser.add_argument('--dtype', choices=("float16", "float32", "float64"), default="float32",
                         help='Float precision (only available in --api v2)')
     parser.add_argument('--backend', type=str, default='chainer',

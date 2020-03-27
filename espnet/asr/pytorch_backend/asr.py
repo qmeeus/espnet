@@ -14,7 +14,7 @@ import sys
 import numpy as np
 import torch
 
-from torch.utils.data import DataLoader 
+from torch.utils.data import DataLoader
 
 from espnet.data.dataset import ASRDataset
 from espnet.asr.asr_utils import add_results_to_json
@@ -50,7 +50,7 @@ matplotlib.use('Agg')
 if sys.version_info[0] == 2:
     from itertools import izip_longest as zip_longest
 else:
-    from itertools import zip_longest as zip_longest    
+    from itertools import zip_longest
 
 DEBUG_MODEL = False
 
@@ -61,8 +61,8 @@ def build_model(list_input_dim, output_dim, args):
     else:
         model_class = dynamic_import(args.model_module)
         model = model_class(
-            list_input_dim[0] if args.num_encs == 1 else list_input_dim, 
-            output_dim, 
+            list_input_dim[0] if args.num_encs == 1 else list_input_dim,
+            output_dim,
             args
         )
 
@@ -82,8 +82,8 @@ def build_model(list_input_dim, output_dim, args):
         logging.info('writing a model config file to ' + model_conf)
         f.write(json.dumps(
             (list_input_dim[0] if args.num_encs == 1 else list_input_dim, output_dim, vars(args)),
-            indent=4, 
-            ensure_ascii=False, 
+            indent=4,
+            ensure_ascii=False,
             sort_keys=True
         ).encode('utf_8'))
 
@@ -97,7 +97,7 @@ def build_model(list_input_dim, output_dim, args):
 
 
 def get_optimizer(model, args):
-    # TODO: use functools.partial and return partially implemented optimizer 
+    # TODO: use functools.partial and return partially implemented optimizer
     # Setup an optimizer
     if args.opt == 'adadelta':
         optimizer = torch.optim.Adadelta(
@@ -139,7 +139,7 @@ def train(args):
         )
 
         train_itr, valid_itr = (
-            DataLoader(dataset, batch_size=args.batch_size, 
+            DataLoader(dataset, batch_size=args.batch_size,
                     collate_fn=dataset.collate_samples)
             for dataset in (training_set, validation_set)
         )
@@ -185,7 +185,7 @@ def train(args):
         import ipdb; ipdb.set_trace()
 
         model_class = dynamic_import(args.model_module)
-        model = ASRModel(model_class, args) 
+        model = ASRModel(model_class, args)
         trainer = Trainer(gpus=[1], log_gpu_memory='all', overfit_pct=.01, profiler=True)
         trainer.fit(model)
         return
@@ -249,8 +249,8 @@ def train(args):
 
     load_tr, load_cv = (
         LoadInputsAndTargets(
-            mode='asr', 
-            load_output=True, 
+            mode='asr',
+            load_output=True,
             preprocess_conf=args.preprocess_conf,
             preprocess_args={'train': is_train}  # Switch the mode of preprocessing
         ) for is_train in (True, False)
@@ -320,8 +320,8 @@ def recog(args):
             rnnlm = lm_pytorch.ClassifierWithState(
                 extlm_pytorch.MultiLevelLM(
                     word_rnnlm.predictor,
-                    rnnlm.predictor, 
-                    word_dict, 
+                    rnnlm.predictor,
+                    word_dict,
                     char_dict
                 )
             )
@@ -331,7 +331,7 @@ def recog(args):
             rnnlm = lm_pytorch.ClassifierWithState(
                 extlm_pytorch.LookAheadWordLM(
                     word_rnnlm.predictor,
-                    word_dict, 
+                    word_dict,
                     char_dict
                 )
             )
@@ -382,9 +382,10 @@ def recog(args):
                     for i in range(0, feat.shape[0], r):
                         hyps = se2e.accept_input(feat[i:i + r])
                         if hyps is not None:
-                            text = ''.join([train_args.char_list[int(x)]
+                            text = ' '.join([train_args.char_list[int(x)]
                                             for x in hyps[0]['yseq'][1:-1] if int(x) != -1])
                             text = text.replace('\u2581', ' ').strip()  # for SentencePiece
+                            text = text.replace('▁', ' ')
                             text = text.replace(model.space, ' ')
                             text = text.replace(model.blank, '')
                             logging.info(text)
@@ -426,9 +427,10 @@ def recog(args):
                     for i in range(0, feat.shape[0], r):
                         hyps = se2e.accept_input(feat[i:i + r])
                         if hyps is not None:
-                            text = ''.join([train_args.char_list[int(x)]
+                            text = ' '.join([train_args.char_list[int(x)]
                                             for x in hyps[0]['yseq'][1:-1] if int(x) != -1])
                             text = text.replace('\u2581', ' ').strip()  # for SentencePiece
+                            text = text.replace('▁', ' ')
                             text = text.replace(model.space, ' ')
                             text = text.replace(model.blank, '')
                             logging.info(text)
