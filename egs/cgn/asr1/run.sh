@@ -244,4 +244,49 @@ if [ ${stop_stage} -le 5 ]; then
   exit 0
 fi
 
+# =======================================================================================
+#                                       DECODING
+# =======================================================================================
+if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
+    echo "stage 5: Decoding"
+    n_jobs=8
+
+    pids=() # initialize pids
+    for rtask in ${recog_set}; do
+    (
+        decode_dir=decode_${rtask}_$(basename ${decode_config%.*})
+        feat_recog_dir=${dumpdir}/${rtask}/delta${do_delta}
+
+        # split data
+        splitjson.py --parts ${n_jobs} ${feat_recog_dir}/data.json
+
+        #### use CPU for decoding
+        ngpu=0
+
+        ${decode_cmd} JOB=1:${n_jobs} ${expdir}/${decode_dir}/log/decode.JOB.log \
+            asr_recog.py \
+            --config ${decode_config} \
+            --ngpu ${ngpu} \
+            --backend ${backend} \
+            --debugmode ${debugmode} \
+            --verbose ${verbose} \
+            --recog-json ${feat_recog_dir}/split${n_jobs}utt/data.JOB.json \
+            --result-label ${expdir}/${decode_dir}/data.JOB.json \
+            --model ${expdir}/results/${recog_model} \
+            ${recog_opts}
+
+        score_sclite.sh ${expdir}/${decode_dir} ${dict}
+
+    ) &
+    pids+=($!) # store background pids
+    done
+    i=0; for pid in "${pids[@]}"; do wait ${pid} || ((++i)); done
+    if [ ${i} -gt 0 ]; then 
+        echo "$0: ${i} background jobs are failed."
+        exit 1
+    fi
+fi
+
+
+
 echo "Done!"

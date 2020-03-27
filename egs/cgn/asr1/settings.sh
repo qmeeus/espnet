@@ -17,7 +17,7 @@ do_delta=false
 
 train_config=conf/train_mtlalpha0.1.yaml
 lm_config=
-decode_config=conf/decode.yaml
+decode_config=conf/decode_ctcweight0.1.yaml
 exp_config=
 
 # # rnnlm related
@@ -28,11 +28,12 @@ exp_config=
 
 # decoding parameter
 recog_model=model.loss.best # set a model to be used for decoding: 'model.acc.best' or 'model.loss.best'
+recog_set=
 
 # exp tag
 tag=                  # tag for managing experiments.
 output_dir=
-target="wordpieces"
+target="wordpiece"
 dataset_tag=".xs"
 
 # data

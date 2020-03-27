@@ -6,6 +6,7 @@ from pathlib import Path
 import kaldiio
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
 from matplotlib import gridspec
 
 
@@ -16,16 +17,23 @@ class Visualiser:
         parser.add_argument("dataset", type=Path, help="Path to json dataset")
         parser.add_argument("model_dir", type=Path, help="Path to model folder")
         parser.add_argument("--output_dir", type=Path, default="exp/graphs")
+        parser.add_argument("--height", type=int, default=20)
+        parser.add_argument("--width", type=int, default=20)
+        parser.add_argument("--label-size", type=int, default=12)
 
-    def __init__(self, model_dir:Path, dataset:Path, output_dir:Path):
+    def __init__(self, model_dir:Path, dataset:Path, output_dir:Path, height:int=20, width:int=20, label_size:int=12):
         self.model_dir = model_dir
         self.dataset = dataset
         self.output_dir = output_dir
+        self.height = height
+        self.width = width
+        self.label_size = label_size
         os.makedirs(output_dir, exist_ok=True)
         with open(dataset) as jsonfile:
             self.metadata = json.load(jsonfile)["utts"]
 
-        self._tgtphr = self.metadata[self.get_random_uttid()]["output"][0]["token"][0]
+        if "unigram" in str(dataset):
+            self._tgtphr = self.metadata[self.get_random_uttid()]["output"][0]["token"][0]
 
     def get_random_uttid(self):
         uttids = list(set(map(self.path2uttid, self.model_dir.glob("results/att_ws/*.npy"))))
@@ -54,21 +62,25 @@ class Visualiser:
         self._plot_features(uttid, aspect=aspect, cmap=cmap)
         self.save_fig(fname)
 
-    def _plot_attention(self, weights:Path, target:str, ax=None, aspect="equal", cmap=None):
+    def _plot_attention(self, weights:Path, target:str, target2=None, ax=None, aspect="equal", cmap=None):
         attn_ws = np.load(weights)
-        target = target.replace(self._tgtphr, "").split(" ")
+        if hasattr(self, "_tgtphr"):
+            target = target.replace(self._tgtphr, "")
+        target = target.split(" ")
         assert len(target) == attn_ws.shape[0]
         ax = ax or plt.subplot()
         ax.imshow(attn_ws, aspect=aspect, cmap=cmap)
         ax.set_xticks([]); ax.set_xticklabels([])
         ax.set_yticks(np.arange(len(target)))
-        ax.set_yticklabels(["<sos>"] + target)
-        ax.tick_params(length=0., labelsize=16)
+        if target2 is not None:
+            target = ["\n".join(ys) for ys in zip(target2.split(" "), target)]
+        ax.set_yticklabels(target)
+        ax.tick_params(length=0., labelsize=self.label_size)
         return ax
 
     def plot_attention(self, uttid, epoch="last", plot_features=True, cmap=None, fname="attention_weights.png"):
         if plot_features:
-            fig = plt.figure(figsize=(12,12))
+            fig = plt.figure(figsize=(self.width, self.height))
             gs = fig.add_gridspec(4,4)
             ax_attn = fig.add_subplot(gs[1:, :])
             ax_feats = fig.add_subplot(gs[0, :])
@@ -78,8 +90,14 @@ class Visualiser:
         epoch = epoch if type(epoch) is int else self.get_last_epoch(uttid)
         weights = Path(self.model_dir, "results", "att_ws", f"{uttid}.ep.{epoch}.npy")
         target = self.metadata[uttid]["output"][0]["token"]
-        self._plot_attention(weights, target, ax=ax_attn, aspect='auto', cmap=cmap)
+        target2 = self.metadata[uttid]["output"][0]["text"] if not hasattr(self, "_tgtphr") else None
+        self._plot_attention(weights, target, target2, ax=ax_attn, aspect='auto', cmap=cmap)
         self.save_fig(fname)
+
+    def plot_frame_sizes(self):
+        n_frames = list(map(lambda example: example["input"][0]["shape"][0], self.metadata.values()))
+        sns.distplot(n_frames)
+        self.save_fig(f"{self.dataset.stem}.png")
 
     def save_fig(self, fname):
         plt.tight_layout()
@@ -91,7 +109,7 @@ class Visualiser:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("plot", type=str,
-                        choices=["feats", "attention", "metrics"],
+                        choices=["feats", "attention", "metrics", "frame_sizes"],
                         help="What do we plot?")
     parser.add_argument("--uttid", "-u", type=str, default=None)
     Visualiser.parse_args(parser)
@@ -105,6 +123,8 @@ def main():
         visualiser.plot_features(uttid)
     elif plot == "attention":
         visualiser.plot_attention(uttid)
+    elif plot == "frame_sizes":
+        visualiser.plot_frame_sizes()
     else:
         raise NotImplemented
 
