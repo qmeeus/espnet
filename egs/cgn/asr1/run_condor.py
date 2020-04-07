@@ -14,8 +14,13 @@ def random_string(length):
 
 def memory_type(string):
     if not re.match(r"\d+[MG]?", string):
-        raise argparse.ArgumentTypeError
+        raise argparse.ArgumentTypeError("Examples: 1000, 15M, 4G")
     return string
+
+def duration(string):
+    if not re.match(r"(?:(?:\d{1,2}:){1,2})?\d{1,2}", string):
+        raise argparse.ArgumentTypeError("Examples: 60, 15:00, 15:00:00")
+    return sum(int(n) * (60 ** i) for i, n in enumerate(string.split(":")[::-1]))
 
 
 class CondorJob:
@@ -26,26 +31,30 @@ class CondorJob:
     @classmethod
     def parse_args(cls):
         parser = argparse.ArgumentParser()
+        
+        # General options
         parser.add_argument("--clean", action="store_true")
-        parser.add_argument("--interactive", action="store_true")
         parser.add_argument("--verbose", "-v", action="store_true")
         parser.add_argument("--dry-run", action="store_true")
 
-        parser.add_argument("--mean_user", action="store_true")
+        # Condor options
+        parser.add_argument("--interactive", action="store_true")
+        parser.add_argument("--bad_user", action="store_true")
         parser.add_argument("--ncpus", default=1, type=int)
         parser.add_argument("--mem", default="8G", type=memory_type)
-        parser.add_argument("--duration", default="100000", type=int)
+        parser.add_argument("--min-cuda-mem", default=None, type=int)
+        parser.add_argument("--min-cuda-cap", default=None, type=str)
+        parser.add_argument("--singularity", action="store_true")
+        parser.add_argument("--duration", default="12:00:00", type=duration)
         parser.add_argument("--ngpu", default=1, type=int)
         parser.add_argument("--project_root", default=Path(__file__).absolute().parent, type=Path)
+        
+        # Script options
         parser.add_argument("command", type=str)
         parser.add_argument("--output_dir", default="exp", type=Path)
         parser.add_argument("--exp-name", type=str, required=True)
         parser.add_argument("--tag", default="debug", type=str)
         parser.add_argument("--njobs", default=1, type=int)
-
-        parser.add_argument("--min-cuda-mem", default=None, type=int)
-        parser.add_argument("--min-cuda-cap", default=None, type=str)
-        parser.add_argument("--singularity", action="store_true")
 
         options, unknown = parser.parse_known_args()
         options = vars(options)
@@ -118,7 +127,7 @@ class CondorJob:
 
     def _format_args(self):
 
-        nice_user = not(self.options.pop("mean_user"))
+        nice_user = not(self.options.pop("bad_user"))
         if self.interactive:
             nice_user = False
             self.options["duration"] = min(14000, self.options["duration"])

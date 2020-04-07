@@ -34,7 +34,7 @@ recog_set=
 tag=                  # tag for managing experiments.
 output_dir=
 target="wordpiece"
-dataset_tag=".xs"
+dataset_tag=""
 
 # data
 cgn_root=/users/spraak/spchdata/cgn
@@ -59,6 +59,6 @@ vocab_size=
 # tag="m"
 # comp="o;k;l;j;m;n;g;f;b;h;a;i"
 # decodecomp="o;k;l;j;m;n;g;f;b;h;a;i"
-train_set="train_m"
-dev_set="dev_m"
-test_set="test_m"
+train_set="CGN_train"
+dev_set="CGN_valid"
+test_set="CGN_test"

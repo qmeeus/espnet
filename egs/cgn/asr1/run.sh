@@ -3,6 +3,8 @@
 # Copyright 2017 Johns Hopkins University (Shinji Watanabe)
 #  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
 
+#echo "Don't run this" && exit 1
+
 . setup.sh
 . path.sh
 . cmd.sh
@@ -123,15 +125,15 @@ if [ ${stage} -le 3 ]; then
     # make json labels
     data2json.sh \
       --feat ${feat_tr_dir}/feats.scp \
-      data/${train_set} ${dict} > ${feat_tr_dir}/data.json
-    
+      data/${train_set} ${dict} > ${feat_tr_dir}/data_char.json
+
     data2json.sh \
       --feat ${feat_dt_dir}/feats.scp \
-      data/${dev_set} ${dict} > ${feat_dt_dir}/data.json
+      data/${dev_set} ${dict} > ${feat_dt_dir}/data_char.json
 
     data2json.sh \
       --feat ${feat_te_dir}/feats.scp \
-      data/${test_set} ${dict} > ${feat_te_dir}/data.json
+      data/${test_set} ${dict} > ${feat_te_dir}/data_char.json
 
 fi
 
@@ -148,7 +150,7 @@ if [ $stage -le 4 ]; then
 
   echo "Stage 4: Train wordpiece model"
   model=unigram
-  vocab_size=5000
+  vocab_size=${vocab_size:-5000}
   lang_dir=data/lang_char
   texts=$lang_dir/input.txt
   model_prefix=${lang_dir}/${train_set}_${model}_${vocab_size}
@@ -281,7 +283,7 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
     pids+=($!) # store background pids
     done
     i=0; for pid in "${pids[@]}"; do wait ${pid} || ((++i)); done
-    if [ ${i} -gt 0 ]; then 
+    if [ ${i} -gt 0 ]; then
         echo "$0: ${i} background jobs are failed."
         exit 1
     fi

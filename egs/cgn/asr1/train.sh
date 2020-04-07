@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -e
 
 . setup.sh
 . path.sh
