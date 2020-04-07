@@ -44,7 +44,7 @@ class CustomTrainer:
         )
 
         self.evaluator = CustomEvaluator(
-            model, training_set, model.reporter, device, args.ngpu
+            model, validation_set, model.reporter, device, args.ngpu
         )
 
         self.trainer = training.Trainer(
@@ -128,22 +128,22 @@ class CustomTrainer:
         )
 
         # Resume from a snapshot
-        if args.resume:
-            logging.info('resumed from %s' % args.resume)
-            torch_resume(args.resume, trainer)
-            report_keys_loss_ctc = (
-                ['main/loss_ctc{}'.format(i + 1) for i in range(self.model.num_encs)]
-                + ['validation/main/loss_ctc{}'.format(i + 1) for i in range(self.model.num_encs)]
-            )
+        # if args.resume:
+        #     logging.info('resumed from %s' % args.resume)
+        #     torch_resume(args.resume, trainer)
+        #     report_keys_loss_ctc = (
+        #         ['main/loss_ctc{}'.format(i + 1) for i in range(self.model.num_encs)]
+        #         + ['validation/main/loss_ctc{}'.format(i + 1) for i in range(self.model.num_encs)]
+        #     )
 
-            report_keys_cer_ctc = (
-                ['main/cer_ctc{}'.format(i + 1) for i in range(self.model.num_encs)]
-                + ['validation/main/cer_ctc{}'.format(i + 1) for i in range(self.model.num_encs)]
-            )
+        #     report_keys_cer_ctc = (
+        #         ['main/cer_ctc{}'.format(i + 1) for i in range(self.model.num_encs)]
+        #         + ['validation/main/cer_ctc{}'.format(i + 1) for i in range(self.model.num_encs)]
+        #     )
 
-            report_keys.extend(report_keys_cer_ctc + report_keys_loss_ctc)
-            loss_plot_keys.extend(report_keys_loss_ctc)
-            cer_plot_keys.extend(report_keys_cer_ctc)
+        #     report_keys.extend(report_keys_cer_ctc + report_keys_loss_ctc)
+        #     loss_plot_keys.extend(report_keys_loss_ctc)
+        #     cer_plot_keys.extend(report_keys_cer_ctc)
 
         # Make a plot for training and validation values
         for keys, metric in zip([loss_plot_keys, acc_plot_keys, cer_plot_keys], ['loss', 'accuracy', 'cer']):
