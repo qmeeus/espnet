@@ -33,21 +33,22 @@ class RNNP(torch.nn.Module):
                 inputdim = idim
             else:
                 inputdim = hdim
-            rnn = torch.nn.LSTM(inputdim, cdim, num_layers=1, bidirectional=bidir,
-                                batch_first=True) if "lstm" in typ \
-                else torch.nn.GRU(inputdim, cdim, num_layers=1, bidirectional=bidir, batch_first=True)
+
+            RNN = torch.nn.LSTM if "lstm" in typ else torch.nn.GRU
+            rnn = RNN(inputdim, cdim, num_layers=1, bidirectional=bidir, batch_first=True)
+            num_directions = 1 + bidir
+
             setattr(self, "%s%d" % ("birnn" if bidir else "rnn", i), rnn)
+
             # bottleneck layer to merge
-            if bidir:
-                setattr(self, "bt%d" % i, torch.nn.Linear(2 * cdim, hdim))
-            else:
-                setattr(self, "bt%d" % i, torch.nn.Linear(cdim, hdim))
+            setattr(self, "bt%d" % i, torch.nn.Linear(num_directions * cdim, hdim))
 
         self.elayers = elayers
         self.cdim = cdim
         self.subsample = subsample
         self.typ = typ
         self.bidir = bidir
+        self.dropout = dropout
 
     def forward(self, xs_pad, ilens, prev_state=None):
         """RNNP forward
@@ -76,6 +77,7 @@ class RNNP(torch.nn.Module):
                 ys_pad = ys_pad[:, ::sub]
                 ilens = ((ilens.float() + 1) / sub).floor().type_as(ilens)
             # (sum _utt frame_utt) x dim
+<<<<<<< HEAD
             projection_layer = getattr(self, 'bt' + str(layer))
             projected = projection_layer(ys_pad.contiguous().view(-1, ys_pad.size(2)))
             xs_pad = projected.view(ys_pad.size(0), ys_pad.size(1), -1)
@@ -83,6 +85,13 @@ class RNNP(torch.nn.Module):
                 xs_pad = torch.tanh(xs_pad)
             elif self.dropout:
                 xs_pad = F.dropout(xs_pad, p=self.dropout)
+=======
+            projected = getattr(self, 'bt' + str(layer)
+                                )(ys_pad.contiguous().view(-1, ys_pad.size(2)))
+            xs_pad = projected.view(ys_pad.size(0), ys_pad.size(1), -1)
+            if layer < self.elayers - 1:              
+                xs_pad = torch.tanh(F.dropout(xs_pad, p=self.dropout))
+>>>>>>> df378fe... fix https://github.com/espnet/espnet/issues/1780
 
         return xs_pad, ilens, elayer_states  # x: utt list of frame x dim
 
