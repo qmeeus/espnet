@@ -60,7 +60,7 @@ class E2E(ASRInterface, torch.nn.Module):
         group.add_argument('--transformer-length-normalized-loss', default=True, type=strtobool,
                            help='normalize loss by length')
 
-        group.add_argument('--dropout-rate', default=0.0, type=float,
+        group.add_argument('--encoder-dropout', default=0.0, type=float,
                            help='Dropout rate for the encoder')
         # Encoder
         group.add_argument('--elayers', default=4, type=int,
@@ -92,8 +92,7 @@ class E2E(ASRInterface, torch.nn.Module):
         :param Namespace args: argument Namespace containing options
         """
         torch.nn.Module.__init__(self)
-        if args.transformer_attn_dropout_rate is None:
-            args.transformer_attn_dropout_rate = args.dropout_rate
+            
         self.encoder = Encoder(
             idim=idim,
             attention_dim=args.adim,
@@ -101,8 +100,8 @@ class E2E(ASRInterface, torch.nn.Module):
             linear_units=args.eunits,
             num_blocks=args.elayers,
             input_layer=args.transformer_input_layer,
-            dropout_rate=args.dropout_rate,
-            positional_dropout_rate=args.dropout_rate,
+            dropout_rate=args.encoder_dropout,
+            positional_dropout_rate=args.encoder_dropout,
             attention_dropout_rate=args.transformer_attn_dropout_rate
         )
         self.decoder = Decoder(
@@ -111,8 +110,8 @@ class E2E(ASRInterface, torch.nn.Module):
             attention_heads=args.aheads,
             linear_units=args.dunits,
             num_blocks=args.dlayers,
-            dropout_rate=args.dropout_rate,
-            positional_dropout_rate=args.dropout_rate,
+            dropout_rate=args.decoder_dropout,
+            positional_dropout_rate=args.decoder_dropout,
             self_attention_dropout_rate=args.transformer_attn_dropout_rate,
             src_attention_dropout_rate=args.transformer_attn_dropout_rate
         )
@@ -131,7 +130,7 @@ class E2E(ASRInterface, torch.nn.Module):
         self.adim = args.adim
         self.mtlalpha = args.mtlalpha
         if args.mtlalpha > 0.0:
-            self.ctc = CTC(odim, args.adim, args.dropout_rate, ctc_type=args.ctc_type, reduce=True)
+            self.ctc = CTC(odim, args.adim, args.encoder_dropout, ctc_type=args.ctc_type, reduce=True)
         else:
             self.ctc = None
 

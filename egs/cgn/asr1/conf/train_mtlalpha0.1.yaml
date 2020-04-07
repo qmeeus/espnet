@@ -20,14 +20,14 @@ subsample: "1_2_2_2_1" # skip every n frame from input to nth layers
 # decoder related
 dlayers: 2
 dunits: 300
-dropout-rate-decoder: 0.5
+decoder-dropout: 0.5
 
 # attention related
 atype: location
 adim: 320
 aconv-chans: 10
 aconv-filts: 100
-dropout-rate: 0.5
+encoder-dropout: 0.5
 
 # hybrid CTC/attention
 mtlalpha: 0.1

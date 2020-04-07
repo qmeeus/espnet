@@ -118,10 +118,6 @@ predefined_asr = {
     "pytorch": {
         "rnn": "espnet.nets.pytorch_backend.e2e_asr:E2E",
         "transformer": "espnet.nets.pytorch_backend.e2e_asr_transformer:E2E",
-    },
-    "chainer": {
-        "rnn": "espnet.nets.chainer_backend.e2e_asr:E2E",
-        "transformer": "espnet.nets.chainer_backend.e2e_asr_transformer:E2E",
     }
 }
 

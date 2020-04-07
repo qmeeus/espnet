@@ -18,6 +18,8 @@ import numpy as np
 import torch
 from espnet.utils.cli_utils import strtobool, count_gpus
 from espnet.utils.training.batchfy import BATCH_COUNT_CHOICES
+from espnet.utils.dynamic_import import dynamic_import
+
 
 def int_or_list_of_ints(s):
     if re.match(r"\[\d(?:\,\d)*\]", s):
@@ -49,8 +51,8 @@ def get_parser(parser=None, required=True):
                         choices=["float16", "float32", "float64", "O0", "O1", "O2", "O3"],
                         help='Data type for training (only pytorch backend). '
                         'O0,O1,.. flags require apex. See https://nvidia.github.io/apex/amp.html#opt-levels')
-    parser.add_argument('--backend', default='chainer', type=str,
-                        choices=['chainer', 'pytorch'],
+    parser.add_argument('--backend', default='pytorch', type=str,
+                        choices=['pytorch'],
                         help='Backend library')
     parser.add_argument('--outdir', type=str, required=required,
                         help='Output directory')
@@ -163,7 +165,7 @@ def get_parser(parser=None, required=True):
                         help='Threshold to stop iteration')
     parser.add_argument('--epochs', '-e', default=30, type=int,
                         help='Maximum number of epochs')
-    parser.add_argument('--early-stop-criterion', default='validation/main/acc', type=str, nargs='?',
+    parser.add_argument('--early-stop-criterion', default='validation/main/loss', type=str, nargs='?',
                         help="Value to monitor to trigger an early stopping of the training")
     parser.add_argument('--patience', default=3, type=int, nargs='?',
                         help="Number of epochs to wait without improvement before stopping the training")
@@ -175,7 +177,7 @@ def get_parser(parser=None, required=True):
                         help='The flag to switch to use noise injection to gradients during training')
     # asr_mix related
     parser.add_argument('--num-spkrs', default=1, type=int,
-                        choices=[1, 2],
+                        choices=[1],
                         help='Number of speakers in the speech.')
     # decoder related
     parser.add_argument('--context-residual', default=False, type=strtobool, nargs='?',
@@ -244,26 +246,7 @@ def get_parser(parser=None, required=True):
                              'By default, the channel is estimated by DNN.')
     parser.add_argument('--bdropout-rate', type=float, default=0.0,
                         help='')
-    # Feature transform: Normalization
-    parser.add_argument('--stats-file', type=str, default=None,
-                        help='The stats file for the feature normalization')
-    parser.add_argument('--apply-uttmvn', type=strtobool, default=True,
-                        help='Apply utterance level mean '
-                             'variance normalization.')
-    parser.add_argument('--uttmvn-norm-means', type=strtobool,
-                        default=True, help='')
-    parser.add_argument('--uttmvn-norm-vars', type=strtobool, default=False,
-                        help='')
-    # Feature transform: Fbank
-    parser.add_argument('--fbank-fs', type=int, default=16000,
-                        help='The sample frequency used for '
-                             'the mel-fbank creation.')
-    parser.add_argument('--n-mels', type=int, default=80,
-                        help='The number of mel-frequency bins.')
-    parser.add_argument('--fbank-fmin', type=float, default=0.,
-                        help='')
-    parser.add_argument('--fbank-fmax', type=float, default=None,
-                        help='')
+
     return parser
 
 
@@ -271,16 +254,9 @@ def main(cmd_args):
     """Run the main training function."""
     parser = get_parser()
     args, _ = parser.parse_known_args(cmd_args)
-    if args.backend == "chainer" and args.train_dtype != "float32":
-        raise NotImplementedError(
-            f"chainer backend does not support --train-dtype {args.train_dtype}."
-            "Use --dtype float32.")
-    if args.ngpu == 0 and args.train_dtype in ("O0", "O1", "O2", "O3", "float16"):
-        raise ValueError(f"--train-dtype {args.train_dtype} does not support the CPU backend.")
 
-    from espnet.utils.dynamic_import import dynamic_import
     if args.model_module is None:
-        model_module = "espnet.nets." + args.backend + "_backend.e2e_asr:E2E"
+        model_module = "espnet.nets.pytorch_backend.e2e_asr:E2E"
     else:
         model_module = args.model_module
     model_class = dynamic_import(model_module)
@@ -289,7 +265,7 @@ def main(cmd_args):
     args = parser.parse_args(cmd_args)
     args.model_module = model_module
     if 'chainer_backend' in args.model_module:
-        args.backend = 'chainer'
+        raise NotImplementedError
     if 'pytorch_backend' in args.model_module:
         args.backend = 'pytorch'
 
@@ -325,29 +301,14 @@ def main(cmd_args):
         args.char_list = None
 
     # train
-    logging.info('backend = ' + args.backend)
 
     if not args.v1:
         from espnet.mtl.train import train
-        train(args)
-        return
 
-    if args.num_spkrs == 1:
-        if args.backend == "chainer":
-            from espnet.asr.chainer_backend.asr import train
-            train(args)
-        elif args.backend == "pytorch":
-            from espnet.asr.pytorch_backend.asr import train
-            train(args)
-        else:
-            raise ValueError("Only chainer and pytorch are supported.")
     else:
-        # FIXME(kamo): Support --model-module
-        if args.backend == "pytorch":
-            from espnet.asr.pytorch_backend.asr_mix import train
-            train(args)
-        else:
-            raise ValueError("Only pytorch is supported.")
+        from espnet.asr.pytorch_backend.asr import train
+
+    train(args)
 
 
 if __name__ == '__main__':

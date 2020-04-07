@@ -38,9 +38,8 @@ def get_parser():
     parser.add_argument('--max-test-size', type=int, default=0, help="Limit the number of test examples")
     parser.add_argument('--dtype', choices=("float16", "float32", "float64"), default="float32",
                         help='Float precision (only available in --api v2)')
-    parser.add_argument('--backend', type=str, default='chainer',
-                        choices=['chainer', 'pytorch'],
-                        help='Backend library')
+    parser.add_argument('--backend', type=str, default='pytorch',
+                        choices=['pytorch'], help='Backend library')
     parser.add_argument('--debugmode', type=int, default=1,
                         help='Debugmode')
     parser.add_argument('--seed', type=int, default=1,
@@ -174,35 +173,15 @@ def main(args):
 
     # recog
     logging.info('backend = ' + args.backend)
-    if args.num_spkrs == 1:
-        if args.backend == "chainer":
-            from espnet.asr.chainer_backend.asr import recog
-            recog(args)
-        elif args.backend == "pytorch":
-            if args.num_encs == 1:
-                # Experimental API that supports custom LMs
-                if args.api == "v2":
-                    from espnet.asr.pytorch_backend.recog import recog_v2
-                    recog_v2(args)
-                else:
-                    from espnet.asr.pytorch_backend.asr import recog
-                    if args.dtype != "float32":
-                        raise NotImplementedError(f"`--dtype {args.dtype}` is only available with `--api v2`")
-                    recog(args)
-            else:
-                if args.api == "v2":
-                    raise NotImplementedError(f"--num-encs {args.num_encs} > 1 is not supported in --api v2")
-                else:
-                    from espnet.asr.pytorch_backend.asr import recog
-                    recog(args)
-        else:
-            raise ValueError("Only chainer and pytorch are supported.")
-    elif args.num_spkrs == 2:
-        if args.backend == "pytorch":
-            from espnet.asr.pytorch_backend.asr_mix import recog
-            recog(args)
-        else:
-            raise ValueError("Only pytorch is supported.")
+    # Experimental API that supports custom LMs
+    if args.api == "v2":
+        from espnet.asr.pytorch_backend.recog import recog_v2
+        recog_v2(args)
+    else:
+        from espnet.asr.pytorch_backend.asr import recog
+        if args.dtype != "float32":
+            raise NotImplementedError(f"`--dtype {args.dtype}` is only available with `--api v2`")
+        recog(args)
 
 
 if __name__ == '__main__':

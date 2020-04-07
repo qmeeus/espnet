@@ -77,21 +77,11 @@ class RNNP(torch.nn.Module):
                 ys_pad = ys_pad[:, ::sub]
                 ilens = ((ilens.float() + 1) / sub).floor().type_as(ilens)
             # (sum _utt frame_utt) x dim
-<<<<<<< HEAD
             projection_layer = getattr(self, 'bt' + str(layer))
             projected = projection_layer(ys_pad.contiguous().view(-1, ys_pad.size(2)))
             xs_pad = projected.view(ys_pad.size(0), ys_pad.size(1), -1)
-            if layer <= self.elayers - 1:
-                xs_pad = torch.tanh(xs_pad)
-            elif self.dropout:
-                xs_pad = F.dropout(xs_pad, p=self.dropout)
-=======
-            projected = getattr(self, 'bt' + str(layer)
-                                )(ys_pad.contiguous().view(-1, ys_pad.size(2)))
-            xs_pad = projected.view(ys_pad.size(0), ys_pad.size(1), -1)
-            if layer < self.elayers - 1:              
+            if layer < self.elayers - 1:
                 xs_pad = torch.tanh(F.dropout(xs_pad, p=self.dropout))
->>>>>>> df378fe... fix https://github.com/espnet/espnet/issues/1780
 
         return xs_pad, ilens, elayer_states  # x: utt list of frame x dim
 
@@ -292,12 +282,12 @@ def encoder_for(args, idim, subsample):
     num_encs = getattr(args, "num_encs", 1)  # use getattr to keep compatibility
     if num_encs == 1:
         # compatible with single encoder asr mode
-        return Encoder(args.etype, idim, args.elayers, args.eunits, args.eprojs, subsample, args.dropout_rate)
+        return Encoder(args.etype, idim, args.elayers, args.eunits, args.eprojs, subsample, args.encoder_dropout)
     elif num_encs >= 1:
         enc_list = torch.nn.ModuleList()
         for idx in range(num_encs):
             enc = Encoder(args.etype[idx], idim[idx], args.elayers[idx], args.eunits[idx], args.eprojs, subsample[idx],
-                          args.dropout_rate[idx])
+                          args.encoder_dropout[idx])
             enc_list.append(enc)
         return enc_list
     else:

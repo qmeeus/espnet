@@ -1,17 +1,12 @@
 """Finetuning methods."""
-
 import logging
 import os
 import torch
-
 from collections import OrderedDict
 
 from espnet.asr.asr_utils import get_model_conf
 from espnet.asr.asr_utils import torch_load
-
 from espnet.nets.asr_interface import ASRInterface
-from espnet.nets.mt_interface import MTInterface
-
 from espnet.utils.dynamic_import import dynamic_import
 
 
@@ -53,36 +48,6 @@ def get_partial_asr_mt_state_dict(model_state_dict, modules):
             new_state_dict[key] = value
 
     return new_state_dict
-
-
-def get_partial_lm_state_dict(model_state_dict, modules):
-    """Create compatible ASR state_dict from model_state_dict (LM).
-
-    The keys for specified modules are modified to match ASR decoder modules keys.
-
-    Args:
-        model_state_dict (OrderedDict): trained model state_dict
-        modules (list): specified module list for transfer
-
-    Return:
-        new_state_dict (OrderedDict): the updated state_dict
-        new_mods (list): the updated module list
-
-    """
-    new_state_dict = OrderedDict()
-    new_modules = []
-
-    for key, value in list(model_state_dict.items()):
-        if key == "predictor.embed.weight" and "predictor.embed." in modules:
-            new_key = "dec.embed.weight"
-            new_state_dict[new_key] = value
-            new_modules += [new_key]
-        elif "predictor.rnn." in key and "predictor.rnn." in modules:
-            new_key = "dec.decoder." + key.split("predictor.rnn.", 1)[1]
-            new_state_dict[new_key] = value
-            new_modules += [new_key]
-
-    return new_state_dict, new_modules
 
 
 def filter_modules(model_state_dict, modules):
@@ -168,7 +133,7 @@ def get_trained_model_state_dict(model_path):
     model_class = dynamic_import(model_module)
     model = model_class(idim, odim, args)
     torch_load(model_path, model)
-    assert isinstance(model, MTInterface) or isinstance(model, ASRInterface)
+    assert isinstance(model, ASRInterface)
 
     return model.state_dict(), 'asr-mt'
 
@@ -205,20 +170,18 @@ def load_trained_modules(idim, odim, args, interface=ASRInterface):
                 model_state_dict, mode = get_trained_model_state_dict(model_path)
 
                 modules = filter_modules(model_state_dict, modules)
-                if mode == 'lm':
-                    partial_state_dict, modules = get_partial_lm_state_dict(model_state_dict, modules)
-                else:
-                    partial_state_dict = get_partial_asr_mt_state_dict(model_state_dict, modules)
 
-                    if partial_state_dict:
-                        if transfer_verification(main_state_dict, partial_state_dict, modules):
-                            logging.warning('loading %s from model: %s', modules, model_path)
-                            for k in partial_state_dict.keys():
-                                logging.warning('override %s' % k)
-                            main_state_dict.update(partial_state_dict)
-                        else:
-                            logging.warning('modules %s in model %s don\'t match your training config',
-                                            modules, model_path)
+                partial_state_dict = get_partial_asr_mt_state_dict(model_state_dict, modules)
+
+                if partial_state_dict:
+                    if transfer_verification(main_state_dict, partial_state_dict, modules):
+                        logging.warning('loading %s from model: %s', modules, model_path)
+                        for k in partial_state_dict.keys():
+                            logging.warning('override %s' % k)
+                        main_state_dict.update(partial_state_dict)
+                    else:
+                        logging.warning('modules %s in model %s don\'t match your training config',
+                                        modules, model_path)
             else:
                 logging.warning('model was not found : %s', model_path)
 

@@ -87,6 +87,8 @@ class E2E(ASRInterface, torch.nn.Module):
         group.add_argument('--subsample', default="1", type=str,
                            help='Subsample input frames x_y_z means subsample every x frame at 1st layer, '
                                 'every y frame at 2nd layer etc.')
+        group.add_argument('--encoder-dropout', default=0.0, type=float,
+                           help='Dropout rate for the encoder')
         return parser
 
     @staticmethod
@@ -112,8 +114,6 @@ class E2E(ASRInterface, torch.nn.Module):
         group.add_argument('--aconv-filts', default=100, type=int,
                            help='Number of attention convolution filters \
                            (negative value indicates no location-aware attention)')
-        group.add_argument('--dropout-rate', default=0.0, type=float,
-                           help='Dropout rate for the encoder')
         return parser
 
     @staticmethod
@@ -127,7 +127,7 @@ class E2E(ASRInterface, torch.nn.Module):
                            help='Number of decoder layers')
         group.add_argument('--dunits', default=320, type=int,
                            help='Number of decoder hidden units')
-        group.add_argument('--dropout-rate-decoder', default=0.0, type=float,
+        group.add_argument('--decoder-dropout', default=0.0, type=float,
                            help='Dropout rate for the decoder')
         group.add_argument('--sampling-probability', default=0.0, type=float,
                            help='Ratio of predicted labels fed back to decoder')
@@ -172,18 +172,7 @@ class E2E(ASRInterface, torch.nn.Module):
         else:
             labeldist = None
 
-        if getattr(args, "use_frontend", False):  # use getattr to keep compatibility
-            # Relative importing because of using python3 syntax
-            from espnet.nets.pytorch_backend.frontends.feature_transform \
-                import feature_transform_for
-            from espnet.nets.pytorch_backend.frontends.frontend \
-                import frontend_for
-
-            self.frontend = frontend_for(args, idim)
-            self.feature_transform = feature_transform_for(args, (idim - 1) * 2)
-            idim = args.n_mels
-        else:
-            self.frontend = None
+        self.frontend = None
 
         # encoder
         self.enc = encoder_for(args, idim, self.subsample)

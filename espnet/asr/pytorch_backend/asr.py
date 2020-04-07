@@ -18,20 +18,15 @@ from torch.utils.data import DataLoader
 
 from espnet.data.dataset import ASRDataset
 from espnet.asr.asr_utils import add_results_to_json
-from espnet.asr.asr_utils import format_mulenc_args
 from espnet.asr.asr_utils import get_model_conf
 from espnet.asr.asr_utils import plot_spectrogram
 from espnet.asr.asr_utils import torch_load
 from espnet.asr.pytorch_backend.asr_init import load_trained_model
 from espnet.asr.pytorch_backend.asr_init import load_trained_modules
-from espnet.asr.pytorch_backend.converter import CustomConverter, CustomConverterMulEnc
+from espnet.asr.pytorch_backend.converter import CustomConverter
 from espnet.asr.pytorch_backend.trainer import CustomTrainer
 
-import espnet.lm.pytorch_backend.extlm as extlm_pytorch
 from espnet.nets.asr_interface import ASRInterface
-import espnet.nets.pytorch_backend.lm.default as lm_pytorch
-from espnet.nets.pytorch_backend.streaming.segment import SegmentStreamingE2E
-from espnet.nets.pytorch_backend.streaming.window import WindowStreamingE2E
 # from espnet.transform.spectrogram import IStft
 from espnet.transform.transformation import Transformation
 from espnet.utils.cli_writers import file_writer_helper
@@ -68,14 +63,6 @@ def build_model(list_input_dim, output_dim, args):
 
     assert isinstance(model, ASRInterface)
 
-    if args.rnnlm is not None:
-        rnnlm_args = get_model_conf(args.rnnlm, args.rnnlm_conf)
-        rnnlm = lm_pytorch.ClassifierWithState(
-            lm_pytorch.RNNLM(
-                len(args.char_list), rnnlm_args.layer, rnnlm_args.unit))
-        torch_load(args.rnnlm, rnnlm)
-        model.rnnlm = rnnlm
-
     # write model config
     model_conf = args.outdir + '/model.json'
     with open(model_conf, 'wb') as f:
@@ -97,7 +84,6 @@ def build_model(list_input_dim, output_dim, args):
 
 
 def get_optimizer(model, args):
-    # TODO: use functools.partial and return partially implemented optimizer
     # Setup an optimizer
     if args.opt == 'adadelta':
         optimizer = torch.optim.Adadelta(
@@ -122,8 +108,6 @@ def train(args):
     """
     # SETUP AND PRELIMINARY OPERATIONS
     set_deterministic_pytorch(args)
-    if args.num_encs > 1:
-        args = format_mulenc_args(args)
 
     # check cuda availability
     if not torch.cuda.is_available():
@@ -218,11 +202,8 @@ def train(args):
 
     # DATA ITERATORS
     # Setup a converter
-    if args.num_encs == 1:
-        converter = CustomConverter(subsampling_factor=model.subsample[0], dtype=dtype)
-    else:
-        converter = CustomConverterMulEnc([i[0] for i in model.subsample_list], dtype=dtype)
-
+    converter = CustomConverter(subsampling_factor=model.subsample[0], dtype=dtype)
+    
     # read json data
     with open(args.train_json, 'rb') as f:
         train_json = json.load(f)['utts']
@@ -293,48 +274,7 @@ def recog(args):
     assert isinstance(model, ASRInterface)
     model.recog_args = args
 
-    # read rnnlm
-    if args.rnnlm:
-        rnnlm_args = get_model_conf(args.rnnlm, args.rnnlm_conf)
-        if getattr(rnnlm_args, "model_module", "default") != "default":
-            raise ValueError("use '--api v2' option to decode with non-default language model")
-        rnnlm = lm_pytorch.ClassifierWithState(
-            lm_pytorch.RNNLM(
-                len(train_args.char_list), rnnlm_args.layer, rnnlm_args.unit, rnnlm_args.embed_unit))
-        torch_load(args.rnnlm, rnnlm)
-        rnnlm.eval()
-    else:
-        rnnlm = None
-
-    if args.word_rnnlm:
-        rnnlm_args = get_model_conf(args.word_rnnlm, args.word_rnnlm_conf)
-        word_dict = rnnlm_args.char_list_dict
-        char_dict = {x: i for i, x in enumerate(train_args.char_list)}
-        word_rnnlm = lm_pytorch.ClassifierWithState(lm_pytorch.RNNLM(
-            len(word_dict), rnnlm_args.layer, rnnlm_args.unit, rnnlm_args.embed_unit))
-        torch_load(args.word_rnnlm, word_rnnlm)
-        word_rnnlm.eval()
-
-        if rnnlm is not None:
-
-            rnnlm = lm_pytorch.ClassifierWithState(
-                extlm_pytorch.MultiLevelLM(
-                    word_rnnlm.predictor,
-                    rnnlm.predictor,
-                    word_dict,
-                    char_dict
-                )
-            )
-
-        else:
-
-            rnnlm = lm_pytorch.ClassifierWithState(
-                extlm_pytorch.LookAheadWordLM(
-                    word_rnnlm.predictor,
-                    word_dict,
-                    char_dict
-                )
-            )
+    rnnlm = None
 
     # gpu
     if args.ngpu == 1:
@@ -362,38 +302,7 @@ def recog(args):
                 batch = [(name, js[name])]
                 feat = load_inputs_and_targets(batch)
                 feat = feat[0][0] if args.num_encs == 1 else [feat[idx][0] for idx in range(model.num_encs)]
-                if args.streaming_mode == 'window' and args.num_encs == 1:
-                    logging.info('Using streaming recognizer with window size %d frames', args.streaming_window)
-                    se2e = WindowStreamingE2E(e2e=model, recog_args=args, rnnlm=rnnlm)
-                    for i in range(0, feat.shape[0], args.streaming_window):
-                        logging.info('Feeding frames %d - %d', i, i + args.streaming_window)
-                        se2e.accept_input(feat[i:i + args.streaming_window])
-                    logging.info('Running offline attention decoder')
-                    se2e.decode_with_attention_offline()
-                    logging.info('Offline attention decoder finished')
-                    nbest_hyps = se2e.retrieve_recognition()
-                elif args.streaming_mode == 'segment' and args.num_encs == 1:
-                    logging.info('Using streaming recognizer with threshold value %d', args.streaming_min_blank_dur)
-                    nbest_hyps = []
-                    for n in range(args.nbest):
-                        nbest_hyps.append({'yseq': [], 'score': 0.0})
-                    se2e = SegmentStreamingE2E(e2e=model, recog_args=args, rnnlm=rnnlm)
-                    r = np.prod(model.subsample)
-                    for i in range(0, feat.shape[0], r):
-                        hyps = se2e.accept_input(feat[i:i + r])
-                        if hyps is not None:
-                            text = ' '.join([train_args.char_list[int(x)]
-                                            for x in hyps[0]['yseq'][1:-1] if int(x) != -1])
-                            text = text.replace('\u2581', ' ').strip()  # for SentencePiece
-                            text = text.replace('▁', ' ')
-                            text = text.replace(model.space, ' ')
-                            text = text.replace(model.blank, '')
-                            logging.info(text)
-                            for n in range(args.nbest):
-                                nbest_hyps[n]['yseq'].extend(hyps[n]['yseq'])
-                                nbest_hyps[n]['score'] += hyps[n]['score']
-                else:
-                    nbest_hyps = model.recognize(feat, args, train_args.char_list, rnnlm)
+                nbest_hyps = model.recognize(feat, args, train_args.char_list, rnnlm)
                 new_js[name] = add_results_to_json(js[name], nbest_hyps, train_args.char_list)
 
     else:
@@ -413,33 +322,7 @@ def recog(args):
                 names = [name for name in names if name]
                 batch = [(name, js[name]) for name in names]
                 feats = load_inputs_and_targets(batch)[0] if args.num_encs == 1 else load_inputs_and_targets(batch)
-                if args.streaming_mode == 'window' and args.num_encs == 1:
-                    raise NotImplementedError
-                elif args.streaming_mode == 'segment' and args.num_encs == 1:
-                    if args.batchsize > 1:
-                        raise NotImplementedError
-                    feat = feats[0]
-                    nbest_hyps = []
-                    for n in range(args.nbest):
-                        nbest_hyps.append({'yseq': [], 'score': 0.0})
-                    se2e = SegmentStreamingE2E(e2e=model, recog_args=args, rnnlm=rnnlm)
-                    r = np.prod(model.subsample)
-                    for i in range(0, feat.shape[0], r):
-                        hyps = se2e.accept_input(feat[i:i + r])
-                        if hyps is not None:
-                            text = ' '.join([train_args.char_list[int(x)]
-                                            for x in hyps[0]['yseq'][1:-1] if int(x) != -1])
-                            text = text.replace('\u2581', ' ').strip()  # for SentencePiece
-                            text = text.replace('▁', ' ')
-                            text = text.replace(model.space, ' ')
-                            text = text.replace(model.blank, '')
-                            logging.info(text)
-                            for n in range(args.nbest):
-                                nbest_hyps[n]['yseq'].extend(hyps[n]['yseq'])
-                                nbest_hyps[n]['score'] += hyps[n]['score']
-                    nbest_hyps = [nbest_hyps]
-                else:
-                    nbest_hyps = model.recognize_batch(feats, args, train_args.char_list, rnnlm=rnnlm)
+                nbest_hyps = model.recognize_batch(feats, args, train_args.char_list, rnnlm=rnnlm)
 
                 for i, nbest_hyp in enumerate(nbest_hyps):
                     name = names[i]

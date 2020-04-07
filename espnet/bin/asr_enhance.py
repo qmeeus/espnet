@@ -26,9 +26,8 @@ def get_parser():
 
     parser.add_argument('--ngpu', default=0, type=int,
                         help='Number of GPUs')
-    parser.add_argument('--backend', default='chainer', type=str,
-                        choices=['chainer', 'pytorch'],
-                        help='Backend library')
+    parser.add_argument('--backend', default='pytorch', type=str,
+                        choices=['pytorch'], help='Backend library')
     parser.add_argument('--debugmode', default=1, type=int,
                         help='Debugmode')
     parser.add_argument('--seed', default=1, type=int,

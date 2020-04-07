@@ -182,7 +182,7 @@ class CustomTrainer:
         # epsilon decay in the optimizer
         if args.opt == 'adadelta':
 
-            if args.criterion == 'acc' and args.mtl_mode != 'ctc':
+            if args.criterion == 'accuracy' and args.mtl_mode != 'ctc':
 
                 best_acc_trigger = CompareValueTrigger('validation/main/accuracy', operator.gt)
 

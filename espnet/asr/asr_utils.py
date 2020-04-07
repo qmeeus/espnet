@@ -448,20 +448,6 @@ def get_model_conf(model_path, conf_path=None):
         return idim, odim, argparse.Namespace(**args)
 
 
-def chainer_load(path, model):
-    """Load chainer model parameters.
-
-    Args:
-        path (str): Model path or snapshot file path to be loaded.
-        model (chainer.Chain): Chainer model.
-
-    """
-    if 'snapshot' in os.path.basename(path):
-        chainer.serializers.load_npz(path, model, path='updater/model:main/')
-    else:
-        chainer.serializers.load_npz(path, model)
-
-
 def torch_save(path, model):
     """Save torch model states.
 
@@ -687,44 +673,3 @@ def plot_spectrogram(plt, spec, mode='db', fs=None, frame_shift=None,
                     labelbottom=labelbottom, labelleft=labelleft,
                     labelright=labelright, labeltop=labeltop)
     plt.axis('auto')
-
-
-# * ------------------ recognition related ------------------ *
-def format_mulenc_args(args):
-    """Format args for multi-encoder setup.
-
-    It deals with following situations:  (when args.num_encs=2):
-    1. args.elayers = None -> args.elayers = [4, 4];
-    2. args.elayers = 4 -> args.elayers = [4, 4];
-    3. args.elayers = [4, 4, 4] -> args.elayers = [4, 4].
-
-    """
-    # default values when None is assigned.
-    default_dict = {'etype': 'blstmp',
-                    'elayers': 4,
-                    'eunits': 300,
-                    'subsample': '1',
-                    'dropout_rate': 0.0,
-                    'atype': 'dot',
-                    'adim': 320,
-                    'awin': 5,
-                    'aheads': 4,
-                    'aconv_chans': -1,
-                    'aconv_filts': 100
-                    }
-    for k in default_dict.keys():
-        if isinstance(vars(args)[k], list):
-            if len(vars(args)[k]) != args.num_encs:
-                logging.warning("Length mismatch {}: Convert {} to {}.".format(
-                    k, vars(args)[k], vars(args)[k][:args.num_encs]))
-            vars(args)[k] = vars(args)[k][:args.num_encs]
-        else:
-            if not vars(args)[k]:
-                # assign default value if it is None
-                vars(args)[k] = default_dict[k]
-                logging.warning("{} is not specified, use default value {}.".format(k, default_dict[k]))
-            # duplicate
-            logging.warning("Type mismatch {}: Convert {} to {}.".format(
-                k, vars(args)[k], [vars(args)[k] for _ in range(args.num_encs)]))
-            vars(args)[k] = [vars(args)[k] for _ in range(args.num_encs)]
-    return args
