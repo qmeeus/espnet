@@ -105,11 +105,13 @@ class PyramidalRNNLayer(nn.Module):
             hidden_size=hidden_size,
             num_layers=1,
             bidirectional=self.bidirectional,
-            batch_first=True,
-            dropout=dropout
+            batch_first=True
         )
 
         self.fc = nn.Linear(hidden_size * self.num_directions, output_dim)
+
+        if dropout:
+            self.dropout = nn.Dropout(dropout)
 
     def forward(self, inputs, input_lengths, prev_state=None):
         batch_size = inputs.size(0)
@@ -133,7 +135,10 @@ class PyramidalRNNLayer(nn.Module):
 
         timesteps = outputs.size(1)
         outputs = self.fc(outputs.contiguous().view(-1, outputs.size(2)))
-        
+
+        if hasattr(self, "dropout"):
+            outputs = self.dropout(outputs)
+
         if self.output_activation:
             outputs = self.output_activation(outputs)
 
@@ -171,7 +176,7 @@ class PyramidalRNN(nn.Module):
                 hidden_size=hidden_units,
                 output_dim=output_dim,
                 subsampling=subsampling[i],
-                dropout=dropout,
+                dropout=dropout if i < num_layers else None,
                 bidirectional=bidirectional,
                 recurrent_unit_type=recurrent_unit_type,
                 output_activation="tanh" if i < num_layers else None
