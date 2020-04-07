@@ -27,14 +27,15 @@ class RNNP(torch.nn.Module):
     def __init__(self, idim, elayers, cdim, hdim, subsample, dropout, typ="blstm"):
         super(RNNP, self).__init__()
         bidir = typ[0] == "b"
+        self.dropout = dropout
         for i in six.moves.range(elayers):
             if i == 0:
                 inputdim = idim
             else:
                 inputdim = hdim
-            rnn = torch.nn.LSTM(inputdim, cdim, dropout=dropout, num_layers=1, bidirectional=bidir,
+            rnn = torch.nn.LSTM(inputdim, cdim, num_layers=1, bidirectional=bidir,
                                 batch_first=True) if "lstm" in typ \
-                else torch.nn.GRU(inputdim, cdim, dropout=dropout, num_layers=1, bidirectional=bidir, batch_first=True)
+                else torch.nn.GRU(inputdim, cdim, num_layers=1, bidirectional=bidir, batch_first=True)
             setattr(self, "%s%d" % ("birnn" if bidir else "rnn", i), rnn)
             # bottleneck layer to merge
             if bidir:
@@ -77,10 +78,11 @@ class RNNP(torch.nn.Module):
             # (sum _utt frame_utt) x dim
             projection_layer = getattr(self, 'bt' + str(layer))
             projected = projection_layer(ys_pad.contiguous().view(-1, ys_pad.size(2)))
-            if layer == self.elayers - 1:
-                xs_pad = projected.view(ys_pad.size(0), ys_pad.size(1), -1)
-            else:
-                xs_pad = torch.tanh(projected.view(ys_pad.size(0), ys_pad.size(1), -1))
+            xs_pad = projected.view(ys_pad.size(0), ys_pad.size(1), -1)
+            if layer <= self.elayers - 1:
+                xs_pad = torch.tanh(xs_pad)
+            elif self.dropout:
+                xs_pad = F.dropout(xs_pad, p=self.dropout)
 
         return xs_pad, ilens, elayer_states  # x: utt list of frame x dim
 
