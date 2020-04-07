@@ -19,7 +19,7 @@ import torch.nn as nn
 from espnet.nets.pytorch_backend_.ctc import ctc_for
 from espnet.nets.pytorch_backend_.rnn.attentions import att_for
 from espnet.nets.pytorch_backend_.rnn.decoders import decoder_for
-from espnet.nets.pytorch_backend_.rnn.encoders_ import encoder_for
+from espnet.nets.pytorch_backend_.rnn.encoders import encoder_for
 
 from espnet.nets.e2e_asr_common import label_smoothing_dist
 from espnet.nets.pytorch_backend.initialization import lecun_normal_init_parameters
@@ -64,6 +64,8 @@ class E2E(nn.Module):
         group.add_argument('--subsample', default="1", type=str,  # FIXME: unclear and inelegant
                            help='Subsample input frames x_y_z means subsample every x frame at 1st layer, '
                                 'every y frame at 2nd layer etc.')
+        group.add_argument('--encoder-dropout', default=0.0, type=float,
+                           help='Dropout rate for the encoder')
         return parser
 
     @staticmethod
@@ -71,24 +73,17 @@ class E2E(nn.Module):
         """Add arguments for the attention."""
         group = parser.add_argument_group("E2E attention setting")
         # attention
-        group.add_argument('--atype', default='dot', type=str, choices=[
-            'noatt', 'dot', 'add', 'location', 'coverage', 'coverage_location', 'location2d', 
-            'location_recurrent', 'multi_head_dot', 'multi_head_add', 'multi_head_loc', 'multi_head_multi_res_loc'
-        ], help='Type of attention architecture')
+        group.add_argument('--atype', default='location', type=str, 
+                           choices=['location', 'coverage_location', 'location_recurrent'], 
+                           help='Type of attention architecture')
         group.add_argument('--adim', default=320, type=int,
                            help='Number of attention transformation dimensions')
-        group.add_argument('--awin', default=5, type=int,
-                           help='Window size for location2d attention')
-        group.add_argument('--aheads', default=4, type=int,
-                           help='Number of heads for multi head attention')
-        group.add_argument('--aconv-chans', default=-1, type=int,
+        group.add_argument('--aconv-chans', default=10, type=int,
                            help='Number of attention convolution channels \
                            (negative value indicates no location-aware attention)')
         group.add_argument('--aconv-filts', default=100, type=int,
                            help='Number of attention convolution filters \
                            (negative value indicates no location-aware attention)')
-        group.add_argument('--dropout-rate', default=0.0, type=float,
-                           help='Dropout rate for the encoder')
         return parser
 
     @staticmethod
@@ -153,20 +148,6 @@ class E2E(nn.Module):
 
         # weight initialization
         self.init_weights()
-
-        # # options for beam search
-        # if args.report_cer or args.report_wer:
-        #     self.recog_args = argparse.Namespace()
-        #     for arg in ("beam_size", "penalty", "ctc_weight", "maxlenratio", "minlenratio", 
-        #                 "lm_weight", 'rnnlm', 'nbest', 'sym_space', 'sym_blank'):
-        #         setattr(self.recog_args, getattr(args, arg))
-            
-        #     self.report_cer = args.report_cer
-        #     self.report_wer = args.report_wer
-
-        # else:
-        #     self.report_cer = False
-        #     self.report_wer = False
 
     def init_weights(self):
         """Initialize weight like chainer.
