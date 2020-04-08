@@ -92,11 +92,11 @@ def load_trained_model(model_path):
 
     logging.warning('reading model parameters from ' + model_path)
 
-    if hasattr(train_args, "model_module"):
-        model_module = train_args.model_module
+    if hasattr(train_args, "model_class"):
+        model_class = train_args.model_class
     else:
-        model_module = "espnet.nets.pytorch_backend.e2e_asr:E2E"
-    model_class = dynamic_import(model_module)
+        model_class = "espnet.nets.pytorch_backend.e2e_asr:E2E"
+    model_class = dynamic_import(model_class)
     model = model_class(idim, odim, train_args)
 
     torch_load(model_path, model)
@@ -125,12 +125,12 @@ def get_trained_model_state_dict(model_path):
 
     logging.warning('reading model parameters from ' + model_path)
 
-    if hasattr(args, "model_module"):
-        model_module = args.model_module
+    if hasattr(args, "model_class"):
+        model_class = args.model_class
     else:
-        model_module = "espnet.nets.pytorch_backend.e2e_asr:E2E"
+        model_class = "espnet.nets.pytorch_backend.e2e_asr:E2E"
 
-    model_class = dynamic_import(model_module)
+    model_class = dynamic_import(model_class)
     model = model_class(idim, odim, args)
     torch_load(model_path, model)
     assert isinstance(model, ASRInterface)
@@ -156,7 +156,7 @@ def load_trained_modules(idim, odim, args, interface=ASRInterface):
     enc_modules = args.enc_init_mods
     dec_modules = args.dec_init_mods
 
-    model_class = dynamic_import(args.model_module)
+    model_class = dynamic_import(args.model_class)
     main_model = model_class(idim, odim, args)
     assert isinstance(main_model, interface)
 

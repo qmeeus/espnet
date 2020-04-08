@@ -54,7 +54,7 @@ def build_model(list_input_dim, output_dim, args):
     if (args.enc_init is not None or args.dec_init is not None) and args.num_encs == 1:
         model = load_trained_modules(list_input_dim[0], output_dim, args)
     else:
-        model_class = dynamic_import(args.model_module)
+        model_class = dynamic_import(args.model_class)
         model = model_class(
             list_input_dim[0] if args.num_encs == 1 else list_input_dim,
             output_dim,
@@ -168,7 +168,7 @@ def train(args):
         from espnet.asr.pytorch_backend.model import ASRModel
         import ipdb; ipdb.set_trace()
 
-        model_class = dynamic_import(args.model_module)
+        model_class = dynamic_import(args.model_class)
         model = ASRModel(model_class, args)
         trainer = Trainer(gpus=[1], log_gpu_memory='all', overfit_pct=.01, profiler=True)
         trainer.fit(model)
@@ -203,7 +203,7 @@ def train(args):
     # DATA ITERATORS
     # Setup a converter
     converter = CustomConverter(subsampling_factor=model.subsample[0], dtype=dtype)
-    
+
     # read json data
     with open(args.train_json, 'rb') as f:
         train_json = json.load(f)['utts']
@@ -347,7 +347,7 @@ def enhance(args):
 
     # load trained model parameters
     logging.info('reading model parameters from ' + args.model)
-    model_class = dynamic_import(train_args.model_module)
+    model_class = dynamic_import(train_args.model_class)
     model = model_class(idim, odim, train_args)
     assert isinstance(model, ASRInterface)
     torch_load(args.model, model)
