@@ -35,6 +35,7 @@ tag=                  # tag for managing experiments.
 output_dir=
 target="wordpiece"
 dataset_tag=""
+validset_tag=""
 
 # data
 cgn_root=/users/spraak/spchdata/cgn

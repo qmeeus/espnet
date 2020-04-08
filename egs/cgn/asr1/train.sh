@@ -9,30 +9,33 @@
 set -u
 set -o pipefail
 
+validset_tag=${validset_tag:-$dataset_tag}
+
 case $target in
   "char")
     dict=data/lang_1char/${train_set}_units.txt
-    jsonfile="data${dataset_tag}.json"
+    json_prefix="data"
     ;;
   "wordpiece")
     dict=data/lang_char/${train_set}_unigram_${vocab_size}_units.txt
-    jsonfile="data_unigram_${vocab_size}${dataset_tag}.json"
+    json_prefix="data_unigram_${vocab_size}"
     ;;
   "word")
     dict=data/lang_word/${train_set}_word_units.txt
-    jsonfile="data_word${dataset_tag}.json"
+    json_prefix="data_word"
     ;;
   "pos")
     dict=data/lang_word/${train_set}_pos_units.txt
-    jsonfile="data_pos_300${dataset_tag}.json"
+    json_prefix="data_pos_300"
     ;;
   *)
     echo "Invalid target: $target" && exit 1
     ;;
 esac
 
+
 # config_name=$(basename ${train_config%.*})
-# target_name=$(echo $jsonfile | sed "s/data|\.json//g")
+# target_name=$(echo $jsontrain | sed "s/data|\.json//g")
 # expname="${train_set}_${config_name}${tag+_$tag}${target_name}"
 train_features=dump/${train_set}/deltafalse
 dev_features=dump/${dev_set}/deltafalse
@@ -54,6 +57,6 @@ asr_train.py \
   --minibatches ${N} \
   --verbose 0 \
   --resume ${resume} \
-  --train-json ${train_features}/$jsonfile \
-  --valid-json ${dev_features}/$jsonfile \
+  --train-json ${train_features}/${json_prefix}${dataset_tag}.json \
+  --valid-json ${dev_features}/${json_prefix}${validset_tag}.json \
   | tee $output_dir/train.log
