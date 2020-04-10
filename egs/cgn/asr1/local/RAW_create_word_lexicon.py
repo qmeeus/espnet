@@ -1,68 +1,255 @@
 # coding: utf-8
 import os
 import json
-from collections import Counter
-from collections import defaultdict
+from collections import Counter, defaultdict
 from tqdm import tqdm
+from pathlib import Path
+import argparse
+from functools import partial
+from unidecode import unidecode
 
-def create_vocab(sentences, output_dir, subset):
+
+DROP_REASON = {
+    "blacklist": 0,
+    "unknown": 0
+}
+
+UNKNOWN_WORDS = set()
+
+
+def absolute_path(path):
+    path = Path(path).expanduser().resolve()
+    if not path.exists():
+        raise argparse.ArgumentTypeError(path)
+    return path
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--vocab-file", type=Path,
+                        default="data/lang_word/CGN_train_word_units.txt", 
+                        help="Where to save the vocabulary file")
+
+    parser.add_argument("--known-words", type=absolute_path,
+                        default="~/spchdisk/data/dutchembeddings/CoNLL17/vocab.txt",
+                        help="Path to embeddings vocab. This file can be created in bash with:\n"
+                        "`tail -n+1 $embedding_file | cut -d ' ' -f1 > $vocab`")
+
+    parser.add_argument("--eos", default="</s>", type=str, help="EOS symbol")
+    parser.add_argument("--eos-index", default=-1, type=int, help="EOS index (-1 for last)")
+    parser.add_argument("--unk", default="<unk>", type=str, help="UNK symbol")
+    parser.add_argument("--unk-index", default=0, type=int, help="UNK index (-1 for last)")
+
+    parser.add_argument("--datatags", nargs="*", default=["all", "o", "ok", "mono"], 
+                        help="The tag of the dataset, used to identify the json file")
+
+    parser.add_argument("--source-dataset", type=str,
+                        default="data_unigram_1000.{}.json", 
+                        help="What json file to use in the data directory. "
+                        "{} is replaced by one of DATATAGS and should be escaped in bash.")
+    
+    parser.add_argument("--subsets", nargs="*",
+                        default=["train", "valid", "test"],
+                        help="Which subsets to process")
+
+    parser.add_argument("--dataset-path", type=str, 
+                        default="dump/CGN_{}/deltafalse", 
+                        help="How to find the right path to the dataset dump. "
+                        "{} is replaced by one of SUBSETS and should be escaped in bash.")
+
+    parser.add_argument("--remove-dash", action="store_true", 
+                        help="Replace dashes (-) with spaces in sentences before parsing")
+
+    parser.add_argument("--deaccent", action="store_true", 
+                        help="Remove accent from sentences")
+
+    parser.add_argument("--unknown-action", default="drop",
+                        choices=["drop", "ignore"],
+                        help="What to do with the words not present in the embeddings file.\n"
+                        "drop: the sentence is not added to the dataset\n"
+                        "ignore: the word is replaced with the special symbol <unk>")
+
+    parser.add_argument("--blacklist", nargs="*", 
+                        default=["xxx", "ggg"], 
+                        help="Special words that if present will cause to drop the sentence.")
+
+    parser.add_argument("--ignored-words", nargs="*", 
+                        default=["uh", "mmh", "uhm"], 
+                        help="Special tokens that will be filtered out of the parsed sentence.")
+
+    return parser.parse_args()
+
+
+def load_known_words(vocab_file):
+    with open(vocab_file, encoding='latin-1') as infile:
+        return set(filter(bool, map(str.strip, infile.readlines())))
+
+
+def split_sentence(sentence, remove_dash=False, deaccent=False, ignored_words=None):
+    if deaccent:
+        sentence = unidecode(sentence)
+
+    if remove_dash:
+        sentence = sentence.replace("-",  " ")
+
+    words = sentence.split()
+
+    if ignored_words:
+        words = list(filter(lambda word: word not in ignored_words, words))
+
+    return words
+
+
+def parse_sentence(sentence, word2token, tokenize=str.split, blacklist=None, unknown_action="drop", unk="<unk>"):
+    
+    words = tokenize(sentence)
+
+    if blacklist and any(word in blacklist for word in words):
+        DROP_REASON["blacklist"] += 1
+        return
+        
+    unknown_words = [w for w in words if w not in word2token]
+    if unknown_action == "drop" and unknown_words:
+        DROP_REASON["unknown"] += 1
+        for w in unknown_words:
+            UNKNOWN_WORDS.add(w)
+        return
+    
+    # HACK: unk_index will be None if not present but we don't care because the function should never arrive 
+    # there if there are unknown words. The unk is not in word2token only if unknown_action is drop
+    unk_index = word2token.get(unk)
+    tokens = list(map(lambda w: word2token[w] if w in word2token else unk_index, words))
+    # assert all(token is not None for token in tokens)  # Sanity check, uncomment if you're not sure
+    
+    return {
+        "shape": [len(tokens), len(word2token)],
+        "text": sentence,
+        "token": " ".join(words),
+        "tokenid": " ".join(map(str, tokens))
+    }
+
+
+def build_vocab(sentences, known_words, output_file, tokenize=str.split,
+                eos="</s>", unk="<unk>", eos_index=-1, unk_index=0):
+
     counter = Counter()
     for sent in sentences:
-        counter.update([word for word in sent.split()])
-    lexicon = sorted(counter)
-    lexicon.insert(0, (
-        lexicon.pop(lexicon.index("<unk>"))
-        if "<unk>" in lexicon else "<unk>"
-    ))
+        words = tokenize(sent)
+        counter.update(filter(lambda word: word in known_words, words))
 
-    filename = f"{output_dir}/{subset}_word_units.txt"
-    with open(filename, 'w') as f:
+    lexicon = sorted(counter)
+    
+    for sym, idx in [(eos, eos_index), (unk, unk_index)]:
+        
+        if sym:    
+            lexicon.insert(idx if idx != -1 else len(lexicon), (
+                lexicon.pop(lexicon.index(sym))
+                if sym in lexicon else sym
+            ))
+
+    with open(output_file, 'w') as f:
         for i, word in enumerate(lexicon, 1):
             f.write(f"{word} {i}\n")
 
-    print(f"Lexicon saved to {filename}")
-    word2token = defaultdict(lambda: 1)
-    word2token.update((word, i) for i, word in enumerate(lexicon, 1))
-    return lexicon, word2token
+    print(f"Lexicon saved to {output_file}")
+    word2token = {word: i for i, word in enumerate(lexicon, 1)}
+    return word2token
 
 
-vocab = word2token = None
-langdir = "data/lang_word"
-get_directory = "dump/CGN_{subset}/deltafalse".format
+def read_metadata(input_file:Path):
+    with open(input_file) as infile:
+        return json.load(infile)
 
-for dataset in ["all", "o", "ok", "mono"]:
-    input_json = f"data_unigram_1000.{dataset}.json"
 
-    for subset in ["train", "valid", "test"]:
-        subset_dir = get_directory(subset=subset)
-        with open(f"{subset_dir}/{input_json}") as infile:
-            metadata = json.load(infile)
+def iter_sentences(*filenames):
+    for filename in filenames:
+        for sample in read_metadata(filename)["utts"].values():
+            yield sample["output"][0]["text"]
 
-        ids, samples = map(list, zip(
-            *sorted(metadata["utts"].items(), key=lambda t: t[0])
-        ))
 
-        sentences = (sample["output"][0]["text"] for sample in samples)
-        if vocab is None:
-            sentences = list(sentences)
-            vocab, word2token = create_vocab(
-                sentences, langdir, f"CGN_{subset}"
-            )
+if __name__ == '__main__':
 
-        for uttid, sentence in tqdm(zip(ids, sentences), total=len(ids), desc=f"CGN_{subset}"):
-            words = sentence.split()
-            metadata["utts"][uttid]["output"][0] = {
-                "name": "target1",
-                "shape": [len(words), len(vocab)],
-                "text": sentence,
-                "token": sentence,
-                "tokenid": " ".join(map(str, map(word2token.get, words)))
-            }
+    options = parse_args()
+    if options.unknown_action == "drop":
+        # HACK: see parse_sentence's unk_index
+        options.unk = None
 
-        newfile = f"{subset_dir}/data_words.{dataset}.json"
-        with open(newfile, "w") as outfile:
-            json.dump(metadata, outfile)
+    tokenize = partial(
+        split_sentence, 
+        remove_dash=options.remove_dash,
+        deaccent=options.deaccent,
+        ignored_words=options.ignored_words
+    )
 
-        print(f"Dataset written to {newfile}")
+    known_words = load_known_words(options.known_words)
+    print(f"{len(known_words):,} known words loaded")
 
-# %save -r RAW_create_word_lexicon.py 1-115
+    sentences = iter_sentences(*[
+        Path(options.dataset_path.format(subset), options.source_dataset.format(tag))
+        for subset in options.subsets
+        for tag in options.datatags
+    ])
+    
+    word2token = build_vocab(
+        sentences, 
+        known_words,
+        options.vocab_file,
+        tokenize=tokenize,
+        eos=options.eos,
+        unk=options.unk,
+        eos_index=options.eos_index,
+        unk_index=options.unk_index
+    )
+
+    print(f"Vocabulary size: {len(word2token):,}")
+
+    for tag in options.datatags:
+        input_json = options.source_dataset.format(tag)
+        
+        for subset in options.subsets:
+            
+            total = ignored = 0
+            data_dir = options.dataset_path.format(subset)
+            metadata = read_metadata(Path(data_dir, input_json))
+
+            ids, samples = map(list, zip(
+                *sorted(metadata["utts"].items(), key=lambda t: t[0])
+            ))
+
+            sentences = (sample["output"][0]["text"] for sample in samples)
+            progress_bar = tqdm(zip(ids, sentences), total=len(ids), desc=f"{subset}.{tag}")
+            for uttid, sentence in progress_bar:
+
+                parsed = parse_sentence(
+                    sentence, word2token, 
+                    tokenize=tokenize, 
+                    blacklist=options.blacklist, 
+                    unknown_action=options.unknown_action,
+                    unk=options.unk
+                )
+
+                total += 1
+                if not parsed:
+                    ignored += 1
+                    continue
+
+                metadata["utts"][uttid]["output"][0] = dict(
+                    name="target1",
+                    **parsed
+                )
+
+            print(f"{ignored:,}/{total:,} sentences were dropped ({ignored / total:.2%})")
+
+            newfile = f"{data_dir}/data_words.{tag}.json"
+            with open(newfile, "w") as outfile:
+                json.dump(metadata, outfile)
+
+            print(f"{len(metadata['utts'])} utterances saved to {newfile}")
+
+    unknown_words_file = Path(options.vocab_file.parent, "unknown_words.txt")
+    with open(unknown_words_file, "w") as f:
+        f.write("\n".join(sorted(UNKNOWN_WORDS)))
+
+    print(f"{DROP_REASON['blacklist']} blacklisted and {DROP_REASON['unknown']} unknown")
+    print(f"Unknown words saved as {unknown_words_file}")
