@@ -357,6 +357,7 @@ def make_batchset(data, batch_size=0, max_length_in=float("inf"), max_length_out
         sorted_data = sorted(d.items(), key=lambda data: int(
             data[1][batch_sort_key][batch_sort_axis]['shape'][0]), reverse=not shortest_first)
         logging.debug('# utts: ' + str(len(sorted_data)))
+
         if count == "seq":
             batches = batchfy_by_seq(
                 sorted_data,
@@ -382,6 +383,7 @@ def make_batchset(data, batch_size=0, max_length_in=float("inf"), max_length_out
                 min_batch_size=min_batch_size,
                 shortest_first=shortest_first,
                 ikey=ikey, okey=okey)
+                
         batches_list.append(batches)
 
     if len(batches_list) == 1:

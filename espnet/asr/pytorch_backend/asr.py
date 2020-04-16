@@ -54,14 +54,12 @@ def build_model(list_input_dim, output_dim, args):
     if (args.enc_init is not None or args.dec_init is not None) and args.num_encs == 1:
         model = load_trained_modules(list_input_dim[0], output_dim, args)
     else:
-        model_class = dynamic_import(args.model_class)
-        model = model_class(
+        Model = dynamic_import(args.model_class)
+        model = Model(
             list_input_dim[0] if args.num_encs == 1 else list_input_dim,
             output_dim,
             args
         )
-
-    assert isinstance(model, ASRInterface)
 
     # write model config
     model_conf = args.outdir + '/model.json'
@@ -98,6 +96,7 @@ def get_optimizer(model, args):
     else:
         raise NotImplementedError("unknown optimizer: " + args.opt)
     return optimizer
+
 
 def train(args):
     """Train with the given args.
@@ -176,6 +175,9 @@ def train(args):
 
     # MODEL AND OPTIMIZER CONFIGURATION
     model = build_model(idim_list, odim, args)
+    for line in str(model).split("\n"):
+        logging.info(line)
+        
     reporter = model.reporter
     model = model.to(device=device, dtype=dtype)
     optimizer = get_optimizer(model, args)

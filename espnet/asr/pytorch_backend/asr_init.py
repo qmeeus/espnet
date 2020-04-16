@@ -133,7 +133,7 @@ def get_trained_model_state_dict(model_path):
     model_class = dynamic_import(model_class)
     model = model_class(idim, odim, args)
     torch_load(model_path, model)
-    assert isinstance(model, ASRInterface)
+    # assert isinstance(model, ASRInterface)
 
     return model.state_dict(), 'asr-mt'
 
@@ -156,11 +156,10 @@ def load_trained_modules(idim, odim, args, interface=ASRInterface):
     enc_modules = args.enc_init_mods
     dec_modules = args.dec_init_mods
 
-    model_class = dynamic_import(args.model_class)
-    main_model = model_class(idim, odim, args)
-    assert isinstance(main_model, interface)
+    Model = dynamic_import(args.model_class)
+    model = Model(idim, odim, args)
 
-    main_state_dict = main_model.state_dict()
+    state_dict = model.state_dict()
 
     logging.warning('model(s) found for pre-initialization')
     for model_path, modules in [(enc_model_path, enc_modules),
@@ -174,17 +173,17 @@ def load_trained_modules(idim, odim, args, interface=ASRInterface):
                 partial_state_dict = get_partial_asr_mt_state_dict(model_state_dict, modules)
 
                 if partial_state_dict:
-                    if transfer_verification(main_state_dict, partial_state_dict, modules):
+                    if transfer_verification(state_dict, partial_state_dict, modules):
                         logging.warning('loading %s from model: %s', modules, model_path)
                         for k in partial_state_dict.keys():
                             logging.warning('override %s' % k)
-                        main_state_dict.update(partial_state_dict)
+                        state_dict.update(partial_state_dict)
                     else:
                         logging.warning('modules %s in model %s don\'t match your training config',
                                         modules, model_path)
             else:
                 logging.warning('model was not found : %s', model_path)
 
-    main_model.load_state_dict(main_state_dict)
+    model.load_state_dict(state_dict)
 
-    return main_model
+    return model

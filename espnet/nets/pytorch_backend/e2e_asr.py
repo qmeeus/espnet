@@ -28,7 +28,6 @@ from espnet.nets.asr_interface import ASRInterface
 from espnet.nets.e2e_asr_common import label_smoothing_dist
 from espnet.nets.pytorch_backend.ctc import ctc_for
 from espnet.nets.pytorch_backend.initialization import lecun_normal_init_parameters
-from espnet.nets.pytorch_backend.initialization import set_forget_bias_to_one
 from espnet.nets.pytorch_backend.nets_utils import get_subsample
 from espnet.nets.pytorch_backend.nets_utils import pad_list
 from espnet.nets.pytorch_backend.nets_utils import to_device
@@ -37,6 +36,7 @@ from espnet.nets.pytorch_backend.rnn.attentions import att_for
 from espnet.nets.pytorch_backend.rnn.decoders import decoder_for
 from espnet.nets.pytorch_backend.rnn.encoders import encoder_for
 from espnet.nets.scorers.ctc import CTCPrefixScorer
+
 
 CTC_LOSS_THRESHOLD = 10000
 
@@ -159,8 +159,7 @@ class E2E(ASRInterface, torch.nn.Module):
 
         # below means the last number becomes eos/sos ID
         # note that sos/eos IDs are identical
-        self.sos = odim - 1
-        self.eos = odim - 1
+        self.sos = self.eos = len(self.char_list) - 1
 
         # subsample info
         self.subsample = get_subsample(args, mode='asr', arch='rnn')
@@ -175,13 +174,13 @@ class E2E(ASRInterface, torch.nn.Module):
         self.frontend = None
 
         # encoder
-        self.enc = encoder_for(args, idim, self.subsample)
+        self.encoder = encoder_for(args, idim, self.subsample)
         # ctc
         self.ctc = ctc_for(args, odim)
         # attention
-        self.att = att_for(args)
+        self.attention = att_for(args)
         # decoder
-        self.dec = decoder_for(args, odim, self.sos, self.eos, self.att, labeldist)
+        self.decoder = decoder_for(args, odim, self.sos, self.eos, self.attention, labeldist)
 
         # weight initialization
         self.init_like_chainer()
@@ -214,13 +213,7 @@ class E2E(ASRInterface, torch.nn.Module):
         - LSTM.upward.b[forget_gate_range] = 1 (but not used in NStepLSTM)
         """
         lecun_normal_init_parameters(self)
-        # exceptions
-        # embed weight ~ Normal(0, 1)
-        self.dec.embed.weight.data.normal_(0, 1)
-        # forget-bias = 1.0
-        # https://discuss.pytorch.org/t/set-forget-gate-bias-of-lstm/1745
-        for l in six.moves.range(len(self.dec.decoder)):
-            set_forget_bias_to_one(self.dec.decoder[l].bias_ih)
+        self.decoder.init_weights()
 
     def forward(self, xs_pad, ilens, ys_pad, calc_metrics=False, compat_on=True):
         """E2E forward.
@@ -247,7 +240,7 @@ class E2E(ASRInterface, torch.nn.Module):
         logging.debug(f"Input size: {hs_pad.size()} Output size: {ys_pad.size()}")
 
         # 1. Encoder
-        hs_pad, hlens, _ = self.enc(hs_pad, hlens)
+        hs_pad, hlens, _ = self.encoder(hs_pad, hlens)
 
         logging.debug(f"Enc out: {hs_pad.size()}")
 
@@ -303,7 +296,7 @@ class E2E(ASRInterface, torch.nn.Module):
         
         # 2. attention loss
         loss_att, accuracy, _ = (
-            self.dec.compute_loss(hs_pad, hlens, ys_pad) 
+            self.decoder.compute_loss(hs_pad, hlens, ys_pad) 
             if alpha < 1 else [None] * 3
         )
 
@@ -353,7 +346,7 @@ class E2E(ASRInterface, torch.nn.Module):
                 lpz = None
 
             word_eds, word_ref_lens, char_eds, char_ref_lens = [], [], [], []
-            nbest_hyps = self.dec.recognize_beam_batch(
+            nbest_hyps = self.decoder.recognize_beam_batch(
                 hs_pad, torch.tensor(hlens), lpz,
                 self.recog_args, self.char_list,
                 self.rnnlm)
@@ -384,7 +377,7 @@ class E2E(ASRInterface, torch.nn.Module):
 
     def scorers(self):
         """Scorers."""
-        return dict(decoder=self.dec, ctc=CTCPrefixScorer(self.ctc.compute_loss, self.eos))
+        return dict(decoder=self.decoder, ctc=CTCPrefixScorer(self.ctc.compute_loss, self.eos))
 
     def encode(self, x):
         """Encode acoustic features.
@@ -411,7 +404,7 @@ class E2E(ASRInterface, torch.nn.Module):
             hs, hlens = hs, ilens
 
         # 1. encoder
-        hs, _, _ = self.enc(hs, hlens)
+        hs, _, _ = self.encoder(hs, hlens)
         return hs.squeeze(0)
 
     def recognize(self, x, recog_args, char_list, rnnlm=None):
@@ -433,7 +426,7 @@ class E2E(ASRInterface, torch.nn.Module):
 
         # 2. Decoder
         # decode the first utterance
-        y = self.dec.recognize_beam(hs[0], lpz, recog_args, char_list, rnnlm)
+        y = self.decoder.recognize_beam(hs[0], lpz, recog_args, char_list, rnnlm)
         return y
 
     def recognize_batch(self, xs, recog_args, char_list, rnnlm=None):
@@ -463,7 +456,7 @@ class E2E(ASRInterface, torch.nn.Module):
             hs_pad, hlens = xs_pad, ilens
 
         # 1. Encoder
-        hs_pad, hlens, _ = self.enc(hs_pad, hlens)
+        hs_pad, hlens, _ = self.encoder(hs_pad, hlens)
 
         # calculate log P(z_t|X) for CTC scores
         if recog_args.ctc_weight > 0.0:
@@ -475,7 +468,7 @@ class E2E(ASRInterface, torch.nn.Module):
 
         # 2. Decoder
         hlens = torch.tensor(list(map(int, hlens)))  # make sure hlens is tensor
-        y = self.dec.recognize_beam_batch(hs_pad, hlens, lpz, recog_args, char_list,
+        y = self.decoder.recognize_beam_batch(hs_pad, hlens, lpz, recog_args, char_list,
                                           rnnlm, normalize_score=normalize_score)
 
         if prev:
@@ -524,10 +517,10 @@ class E2E(ASRInterface, torch.nn.Module):
                 hs_pad, hlens = xs_pad, ilens
 
             # 1. Encoder
-            hpad, hlens, _ = self.enc(hs_pad, hlens)
+            hpad, hlens, _ = self.encoder(hs_pad, hlens)
 
             # 2. Decoder
-            att_ws = self.dec.calculate_all_attentions(hpad, hlens, ys_pad)
+            att_ws = self.decoder.calculate_all_attentions(hpad, hlens, ys_pad)
 
         return att_ws
 
