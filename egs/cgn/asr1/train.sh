@@ -11,6 +11,7 @@ set -o pipefail
 
 validset_tag=${validset_tag:-$dataset_tag}
 
+TGT_WORDS=
 case $target in
   "char")
     dict=data/lang_1char/${train_set}_units.txt
@@ -22,7 +23,8 @@ case $target in
     ;;
   "word")
     dict=data/lang_word/${train_set}_word_units.txt
-    json_prefix="data_word"
+    json_prefix="data_words"
+    export TGT_WORDS=1
     ;;
   "pos")
     dict=data/lang_word/${train_set}_pos_units.txt
@@ -34,16 +36,33 @@ case $target in
 esac
 
 
+
+if [ "$TGT_WORDS" == 1 ]; then
+  SCRIPT=w2v_train.py
+else
+  SCRIPT=asr_train.py
+fi
+
+verbose=${verbose:-0}
 # config_name=$(basename ${train_config%.*})
 # target_name=$(echo $jsontrain | sed "s/data|\.json//g")
 # expname="${train_set}_${config_name}${tag+_$tag}${target_name}"
 train_features=dump/${train_set}/deltafalse
 dev_features=dump/${dev_set}/deltafalse
 
+OPTIONS=""
+if ! [ -z "${enc_init}" ]; then
+  OPTIONS="--enc-init $enc_init"
+fi
+
+if ! [ -z "$dec_init" ]; then
+  OPTIONS="$OPTIONS --dec-init $dec_init"
+fi
+
 # output_dir=${output_dir:-exp/$expname}
 mkdir -p $output_dir
 
-asr_train.py \
+$SCRIPT \
   --v1 \
   --config ${train_config} \
   --ngpu ${ngpu} \
@@ -55,8 +74,8 @@ asr_train.py \
   --ctc_type builtin \
   --debugdir $output_dir \
   --minibatches ${N} \
-  --verbose 0 \
+  --verbose $verbose \
   --resume ${resume} \
   --train-json ${train_features}/${json_prefix}${dataset_tag}.json \
-  --valid-json ${dev_features}/${json_prefix}${validset_tag}.json \
+  --valid-json ${dev_features}/${json_prefix}${validset_tag}.json $OPTIONS \
   | tee $output_dir/train.log

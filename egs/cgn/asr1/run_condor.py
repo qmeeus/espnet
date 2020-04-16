@@ -6,6 +6,7 @@ import argparse
 import re
 import random
 import string
+import shutil
 
 
 def random_string(length):
@@ -25,8 +26,7 @@ def duration(string):
 
 class CondorJob:
 
-    JOB_DIR = "jobs"
-    TEMPLATE_FILE = Path(JOB_DIR, "template.job")
+    TEMPLATE_FILE = Path("jobs/template.job")
 
     @classmethod
     def parse_args(cls):
@@ -36,10 +36,18 @@ class CondorJob:
         parser.add_argument("--clean", action="store_true")
         parser.add_argument("--verbose", "-v", action="store_true")
         parser.add_argument("--dry-run", action="store_true")
+        parser.add_argument("--log-dir", default="exp", type=Path, 
+                            help="Output directory")
+        parser.add_argument("--tensorboard-dir", default="tensorboard", type=Path, 
+                            help="Tensorboard directory")
+        parser.add_argument("--exp-name", type=str, required=True, 
+                            help="Appended to $output_dir/")
+        parser.add_argument("--task", type=str, default="train", 
+                            help="Appended to $output_dir/$exp_name/")
 
         # Condor options
-        parser.add_argument("--interactive", action="store_true")
-        parser.add_argument("--bad_user", action="store_true")
+        parser.add_argument("--interactive", "-i", action="store_true")
+        parser.add_argument("--bad-user", action="store_true")
         parser.add_argument("--ncpus", default=1, type=int)
         parser.add_argument("--mem", default="8G", type=memory_type)
         parser.add_argument("--min-cuda-mem", default=None, type=int)
@@ -47,12 +55,10 @@ class CondorJob:
         parser.add_argument("--singularity", action="store_true")
         parser.add_argument("--duration", default="12:00:00", type=duration)
         parser.add_argument("--ngpu", default=1, type=int)
-        parser.add_argument("--project_root", default=Path(__file__).absolute().parent, type=Path)
+        parser.add_argument("--project-root", default=Path(__file__).absolute().parent, type=Path)
         
         # Script options
         parser.add_argument("command", type=str)
-        parser.add_argument("--output_dir", default="exp", type=Path)
-        parser.add_argument("--exp-name", type=str, required=True)
         parser.add_argument("--tag", default="debug", type=str)
         parser.add_argument("--njobs", default=1, type=int)
 
@@ -65,7 +71,7 @@ class CondorJob:
         self.options = options
         self._set_args()
         self._format_args()
-        self.jobfile = Path(self.JOB_DIR, f".{random_string(12)}.tmp")
+        self.jobfile = Path(self.TEMPLATE_FILE.parent, f"{random_string(12)}.job")
         with open(self.TEMPLATE_FILE) as template, open(self.jobfile, 'w') as jobfile:
             job = template.read().format(**self.options)
             if self.verbose:
@@ -85,10 +91,14 @@ class CondorJob:
         self.interactive = self.options.pop("interactive")
         self.verbose = self.options.pop("verbose")
         self.dry_run = self.options.pop("dry_run")
-        output_dir = self.options.pop("output_dir")
+        log_dir = self.options.pop("log_dir")
+        tensorboard_dir = self.options.pop("tensorboard_dir")
         exp_name = self.options["exp_name"]
-        tag = self.options.get("tag", None)
-        self.output_dir = Path(output_dir, exp_name + (f"_{tag}" if tag else ""))
+        task_name = self.options.pop("task")
+        tag = self.options.get("tag", "v0")
+        partial_path = Path(exp_name, tag, task_name)
+        self.output_dir = Path(log_dir, partial_path)
+        self.options["tensorboard_dir"] = str(Path(tensorboard_dir, partial_path))
 
     def run(self):
 
@@ -102,6 +112,7 @@ class CondorJob:
             return
 
         os.makedirs(self.output_dir, exist_ok=True)
+        shutil.copy(self.jobfile, Path(self.output_dir, "condor.job"))
         
         if self.interactive:
             command.append("-interactive")
@@ -139,7 +150,10 @@ class CondorJob:
         for opt, ext in zip(("logfile", "stdout", "stderr"), ("log", "out", "err")):
             self.options[opt] = Path(self.output_dir, f"condor.{ext}")
 
-        self.options["command_args"] += f" --tag {tag} --output_dir {self.output_dir} --ngpu {self.options['ngpu']}"
+        self.options["command_args"] += f" --tag {tag}"
+        self.options["command_args"] += f" --output_dir {self.output_dir}"
+        self.options["command_args"] += f" --ngpu {self.options['ngpu']}"
+        self.options["command_args"] += f" --tensorboard-dir {self.options['tensorboard_dir']}"
 
 
 if __name__ == '__main__':

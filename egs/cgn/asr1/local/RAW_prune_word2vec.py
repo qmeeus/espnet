@@ -36,12 +36,19 @@ def load_word2vec(w2v_file, vocab, special_symbols=None):
 
     words, vectors = (np.array(l) for l in (words, vectors))
     assert vectors.shape == (len(vocab), dim)  # Sanity check
+    print(f"{vectors.shape[0];,} vectors loaded (dim={vectors.shape[1]})")
     return words, vectors
 
 
-def sort_textfile(textfile):
-    command = f"sort {textfile} > {textfile}_ && mv {textfile}_ {textfile}"
-    os.system(command)
+def sort_textfile(textfile, skiplines=0):
+    if skiplines > 0:
+        cmd = f"""head -n {skiplines} {textfile} > {textfile}_ \\
+            && tail -n +{skiplines} {textfile} | sort >> {textfile}_ \\
+            && mv {textfile}_ {textfile}"""
+    else:
+        cmd = f"sort {textfile} > {textfile}_ && mv {textfile}_ {textfile}"
+    
+    os.system(cmd)
 
 
 def prune_word2vec(w2v_file, vocab_file, sort=True, eos="</s>", unk="<unk>"):
@@ -56,7 +63,7 @@ def prune_word2vec(w2v_file, vocab_file, sort=True, eos="</s>", unk="<unk>"):
             f.write(f"{words[i]} {' '.join(map(str, vectors[i]))}\n")
 
     if sort:
-        sort_textfile(new_name)
+        sort_textfile(new_name, skiplines=1)
         sort_textfile(vocab_file)
 
 

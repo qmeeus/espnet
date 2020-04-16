@@ -11,6 +11,8 @@ dumpdir=dump    # directory to dump full features
 N=0             # number of minibatches to be used (mainly for debugging). "0" uses all minibatches.
 verbose=1       # verbose option
 resume=         # Resume the training from snapshot
+enc_init=
+dec_init=
 
 # feature configuration
 do_delta=false
@@ -33,6 +35,7 @@ recog_set=
 # exp tag
 tag=                  # tag for managing experiments.
 output_dir=
+tensorboard_dir=
 target="wordpiece"
 dataset_tag=""
 validset_tag=""

@@ -31,6 +31,10 @@ def parse_args():
                         default="data/lang_word/CGN_train_word_units.txt", 
                         help="Where to save the vocabulary file")
 
+    parser.add_argument("--embeddings", type=absolute_path,
+                        default="~/spchdisk/data/dutchembeddings/CoNLL17/model.txt",
+                        help="Path to word vectors.")
+
     parser.add_argument("--known-words", type=absolute_path,
                         default="~/spchdisk/data/dutchembeddings/CoNLL17/vocab.txt",
                         help="Path to embeddings vocab. This file can be created in bash with:\n"
@@ -130,6 +134,11 @@ def parse_sentence(sentence, word2token, tokenize=str.split, blacklist=None, unk
     }
 
 
+def load_vocab(vocab_file):
+    with open(vocab_file) as f:
+        return dict(map(str.split, map(str.strip, f)))
+
+
 def build_vocab(sentences, known_words, output_file, tokenize=str.split,
                 eos="</s>", unk="<unk>", eos_index=-1, unk_index=0):
 
@@ -203,6 +212,11 @@ if __name__ == '__main__':
     )
 
     print(f"Vocabulary size: {len(word2token):,}")
+
+    from RAW_prune_word2vec import prune_word2vec
+    prune_word2vec(options.embeddings, options.vocab_file, sort=True)
+
+    word2token = load_vocab(options.vocab_file)
 
     for tag in options.datatags:
         input_json = options.source_dataset.format(tag)
