@@ -35,7 +35,6 @@ test_features=dump/${test_set}/deltafalse
     --ngpu ${ngpu} \
     --backend pytorch \
     --outdir $output_dir/results \
-    --tensorboard-dir $tensorboard_dir \
     --debugmode ${debugmode} \
     --dict ${dict} \
     --ctc_type builtin \

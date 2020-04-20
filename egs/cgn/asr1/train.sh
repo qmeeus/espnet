@@ -62,20 +62,24 @@ fi
 # output_dir=${output_dir:-exp/$expname}
 mkdir -p $output_dir
 
-$SCRIPT \
-  --v1 \
-  --config ${train_config} \
-  --ngpu ${ngpu} \
-  --backend pytorch \
-  --outdir $output_dir/results \
-  --tensorboard-dir tensorboard/$(basename $output_dir) \
-  --debugmode ${debugmode} \
-  --dict ${dict} \
-  --ctc_type builtin \
-  --debugdir $output_dir \
-  --minibatches ${N} \
-  --verbose $verbose \
-  --resume ${resume} \
-  --train-json ${train_features}/${json_prefix}${dataset_tag}.json \
-  --valid-json ${dev_features}/${json_prefix}${validset_tag}.json $OPTIONS \
-  | tee $output_dir/train.log
+(
+  
+  $SCRIPT \
+    --v1 \
+    --config ${train_config} \
+    --ngpu ${ngpu} \
+    --backend pytorch \
+    --outdir $output_dir/results \
+    --tensorboard-dir tensorboard/$(basename $output_dir) \
+    --debugmode ${debugmode} \
+    --dict ${dict} \
+    --ctc_type builtin \
+    --debugdir $output_dir \
+    --minibatches ${N} \
+    --verbose $verbose \
+    --resume ${resume} \
+    --train-json ${train_features}/${json_prefix}.${dataset_tag}.json \
+    --valid-json ${dev_features}/${json_prefix}.${validset_tag}.json $OPTIONS \
+    | tee $output_dir/train.log
+
+)  3>&1 1>&2 2>&3 | tee $output_dir/train.err

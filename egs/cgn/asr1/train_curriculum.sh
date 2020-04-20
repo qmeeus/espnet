@@ -22,9 +22,9 @@ train_features=dump/${train_set}/deltafalse
 dev_features=dump/${dev_set}/deltafalse
 
 i=0
-# PRETRAINED_MODEL=exp/train_lstm_mtlalpha0.1_unigram_1000_data_all.2/results/model.loss.best
-PRETRAINED_MODEL=exp/train_lstm_words_pretrained_curriculum/v1/train/mono/results/snapshot.ep.20
-for dataset_tag in all; do  # o ok mono 
+PRETRAINED_MODEL=exp/train_lstm_mtlalpha0.1_unigram_1000_data_all.2/results/model.loss.best
+# PRETRAINED_MODEL=exp/train_lstm_words_pretrained_curriculum/v1/train/mono/results/snapshot.ep.20
+for dataset_tag in o ok mono all; do 
 
   outdir=$output_dir/$dataset_tag
   tb_dir=$tensorboard_dir/$dataset_tag
@@ -32,9 +32,9 @@ for dataset_tag in all; do  # o ok mono
 
   OPTIONS="--enc-init $PRETRAINED_MODEL"
 
-  # if (( $i > 0 )); then
+  if (( $i > 0 )); then
     OPTIONS="$OPTIONS --dec-init $PRETRAINED_MODEL"
-  # fi
+  fi
 
   (
     w2v_train.py \
@@ -56,7 +56,7 @@ for dataset_tag in all; do  # o ok mono
     | tee $outdir/train.log 
   ) 3>&1 1>&2 2>&3 | tee $outdir/train.err
 
-  PRETRAINED_MODEL=$outdir/results/snapshot.ep.20
+  PRETRAINED_MODEL=$outdir/results/model.loss.best
   i=$(( $i +  1 ))
 
 done
