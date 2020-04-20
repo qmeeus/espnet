@@ -25,6 +25,7 @@ test_spm.model
 .vscode*
 *.vim
 *.swp
+.ipynb_checkpoints/*
 
 # dependencies
 tools/venv
