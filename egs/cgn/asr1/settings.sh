@@ -17,6 +17,7 @@ dec_init=
 # feature configuration
 do_delta=false
 
+preprocess_config=conf/specaug.yaml
 train_config=conf/train_mtlalpha0.1.yaml
 lm_config=
 decode_config=conf/decode_ctcweight0.1.yaml

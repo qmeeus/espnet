@@ -18,6 +18,7 @@ eunits: 320
 eprojs: 320
 subsample: "1_2_2_2_1" # skip every n frame from input to nth layers
 enc-init: exp/train_lstm_mtlalpha0.1_unigram_1000_data_all.2/results/model.loss.best
+
 # decoder related
 dlayers: 2
 dunits: 300

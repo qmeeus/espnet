@@ -40,6 +40,7 @@ for dataset_tag in o ok mono all; do
     w2v_train.py \
       --v1 \
       --config ${train_config} \
+      --preprocess-conf ${preprocess_config} \
       --ngpu ${ngpu} \
       --backend pytorch \
       --outdir $outdir/results \
