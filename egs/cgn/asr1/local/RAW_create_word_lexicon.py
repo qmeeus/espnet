@@ -11,11 +11,12 @@ from unidecode import unidecode
 
 DROP_REASON = {
     "blacklist": 0,
-    "unknown": 0
+    "unknown": 0,
+    "length": 0
 }
 
 UNKNOWN_WORDS = set()
-
+MIN_OUTPUT_LENGTH = 1
 
 def absolute_path(path):
     path = Path(path).expanduser().resolve()
@@ -50,7 +51,7 @@ def parse_args():
     parser.add_argument("--unk-index", default=0, type=int, help="UNK index (-1 for last)")
     parser.add_argument("--unk-value", default=None, type=float, help="UNK value (constant)")
 
-    parser.add_argument("--datatags", nargs="*", default=["all", "o", "ok", "mono"],
+    parser.add_argument("--datatags", nargs="*", default=["all", "mono", "ok", "o"],
                         help="The tag of the dataset, used to identify the json file")
 
     parser.add_argument("--source-dataset", type=str,
@@ -132,6 +133,10 @@ def parse_sentence(sentence, word2token, tokenize=str.split, blacklist=None, unk
     unk_index = word2token.get(unk)
     tokens = list(map(lambda w: word2token[w] if w in word2token else unk_index, words))
     # assert all(token is not None for token in tokens)  # Sanity check, uncomment if you're not sure
+
+    if len(tokens) < MIN_OUTPUT_LENGTH:
+        DROP_REASON["length"] += 1
+        return  
 
     return {
         "shape": [len(tokens), len(word2token)],
@@ -273,5 +278,5 @@ if __name__ == '__main__':
     with open(unknown_words_file, "w") as f:
         f.write("\n".join(sorted(UNKNOWN_WORDS)))
 
-    print(f"{DROP_REASON['blacklist']} blacklisted and {DROP_REASON['unknown']} unknown")
-    print(f"Unknown words saved as {unknown_words_file}")
+    print("{blacklist:,} blacklisted, {unknown:,} unknown, {length:,} too short".format(**DROP_REASON))
+    print(f"{len(UNKNOWN_WORDS):,} unknown words saved as {unknown_words_file}")
