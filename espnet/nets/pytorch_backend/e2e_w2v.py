@@ -148,7 +148,8 @@ class E2E(torch.nn.Module):
 
         # below means the last number becomes eos/sos ID
         # note that sos/eos IDs are identical
-        self.sos = self.eos = len(self.char_list) - 1
+        self.sos = self.eos = self.char_list.index("</s>")  #len(self.char_list) - 1
+        self.pad = self.char_list.index("<pad>")
 
         # subsample info
         self.subsample = get_subsample(args, mode='asr', arch='rnn')
@@ -178,6 +179,7 @@ class E2E(torch.nn.Module):
         - LSTM.upward.b[forget_gate_range] = 1 (but not used in NStepLSTM)
         """
         lecun_normal_init_parameters(self.encoder)
+        lecun_normal_init_parameters(self.attention)
         self.decoder.init_weights()
 
     def forward(self, xs_pad, ilens, ys_pad, ylens=None, calc_metrics=False, compat_on=True):

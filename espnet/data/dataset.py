@@ -64,7 +64,7 @@ class ASRDataset(Dataset):
     def __getitem__(self, idx):
         metadatum = self.metadata[idx]
         key = self.keys[idx]
-        sample = dict()
+        sample = {"uttid": key}
         for input in metadatum["input"]:
             features = self.get_data(input["feat"], key)
             if self.transform is not None:
@@ -99,11 +99,12 @@ class ASRDataset(Dataset):
             elif "target" in k:
                 batch[k] = self._collate(v, 0, self.target_pad_value, maxlen)
             else:
-                raise ValueError(f"Unexpected element in batch: {k}")
+                batch[k] = np.array(v)
+                # raise ValueError(f"Unexpected element in batch: {k}")
         # espnet compatibility: return tuple instead of dict
-        batch = batch["input1"], batch["input1_length"], batch["target1"], batch["target1_length"]
+        # batch = batch["input1"], batch["input1_length"], batch["target1"], batch["target1_length"]
         if self.sort_by_length:
-            batch = self.sort_batch(*batch)
+            batch = self.sort_batch(batch, "input1_length")
         return batch
 
     def _collate(self, tensors, axis, padding_value, maxlen=None):
@@ -119,10 +120,18 @@ class ASRDataset(Dataset):
             padded_tensors[i, :] = pad(tensor, padding, mode='constant', value=padding_value)
         return padded_tensors
 
-    def sort_batch(self, *batch):
-        Xlens = batch[1]
+    def sort_batch(self, batch, key="input1_length"):
+        # batch is a dictionary
+        Xlens = batch[key]
+        assert torch.is_tensor(Xlens)
         Xlens, sort_order = Xlens.sort(descending=True)
-        batch = [t.index_select(0, sort_order) for t in batch]
+        for k, v in batch.items():
+            if torch.is_tensor(v):
+                batch[k] = v.index_select(0, sort_order)
+            elif type(v) == np.ndarray:
+                batch[k] = v[sort_order]
+            else:
+                raise NotImplementedError(f"{k}: {type(v)}")
         return batch
 
     @classmethod

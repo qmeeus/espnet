@@ -11,17 +11,9 @@ from torch.nn import functional as F
 
 from argparse import Namespace
 
-from espnet.nets.ctc_prefix_score import CTCPrefixScore
-from espnet.nets.ctc_prefix_score import CTCPrefixScoreTH
-from espnet.nets.e2e_asr_common import end_detect
-from espnet.nets.pytorch_backend.initialization import lecun_normal_init_parameters
-
 from espnet.nets.pytorch_backend.rnn.attentions import att_to_numpy
 from espnet.nets.pytorch_backend.initialization import set_forget_bias_to_one
-from espnet.nets.pytorch_backend.nets_utils import mask_by_length
 from espnet.nets.pytorch_backend.nets_utils import pad_list
-from espnet.nets.pytorch_backend.nets_utils import th_accuracy
-from espnet.nets.pytorch_backend.nets_utils import to_device
 from espnet.utils.torch_utils import load_pretrained_embedding_from_file
 
 MAX_DECODER_OUTPUT = 5
@@ -63,9 +55,7 @@ class Decoder(nn.Module):
         self.context_residual = context_residual
         emb_dim = len(char_list) - 1
 
-        self.embed = load_pretrained_embedding_from_file(
-            EMB_PATH, char_list, freeze=True, eos_idx=eos
-        )
+        self.embed = load_pretrained_embedding_from_file(EMB_PATH, char_list, freeze=True)
 
         self.dropout_emb = nn.Dropout(p=dropout)
 
@@ -93,6 +83,7 @@ class Decoder(nn.Module):
         self.dunits = dunits
         self.sos = sos
         self.eos = eos
+        self.pad = 0
         self.odim = odim
         self.verbose = verbose
         self.char_list = char_list
@@ -104,7 +95,6 @@ class Decoder(nn.Module):
         self.logzero = -1e10
 
     def init_weights(self):
-        lecun_normal_init_parameters(self.attention)
         # forget-bias = 1.0
         # https://discuss.pytorch.org/t/set-forget-gate-bias-of-lstm/1745
         for layer in range(self.num_layers):
@@ -199,8 +189,8 @@ class Decoder(nn.Module):
         prev_output_tokens = self._add_sos_token(ys, pad=True, pad_value=self.eos)
         eos = ys_pad[0].new([self.eos])
         target = [torch.cat([y, eos], dim=0) for y in ys]
-        target_pad = pad_list(target, self.eos)
-        target_mask = (target_pad == self.eos)
+        target_pad = pad_list(target, self.pad)
+        target_mask = (target_pad == self.pad)
         target_emb = self.embed(target_pad)
 
         # get dim, length info
@@ -210,10 +200,25 @@ class Decoder(nn.Module):
         predictions, _ = self.forward(hs_pad, hlens, prev_output_tokens)
 
         losses = F.mse_loss(target_emb, predictions, reduction="none").mean(-1)
-        loss = (losses.masked_fill(target_mask, 0).sum(-1) / ylens).mean()
+        loss = (losses.masked_fill_(target_mask, 0).sum(-1) / ylens).mean()
 
         logging.debug('att loss:' + ''.join(str(loss.item()).split('\n')))
         return loss, 0, 0
+
+    def _add_eos_token(self, ys):
+        """Append eos token to the target sequences and pad each sequence with pad token
+        :param list of torch.Tensor ys: target sequences
+        :return torch.Tensor: target with eos token padded with pad token
+        :return torch.Tensor: boolean padding mask 
+        """
+        eos = torch.tensor([self.eos]).type_as(ys[0])
+        target = [torch.cat([y, eos], dim=0) for y in ys]
+        target_pad = pad_list(target, self.pad)
+        target_mask = (target_pad == self.pad)
+        return target_pad, target_mask
+        
+    def tokens_to_string(self, tokens):
+        return " ".join(self.char_list[token] for token in tokens)
 
     def _sample_from_previous_output(self, prediction):
         logging.debug(' scheduled sampling ')

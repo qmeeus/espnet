@@ -249,12 +249,7 @@ def main(command_args):
         args.char_list = None
 
     # recog
-
-    if not args.v1:
-        from espnet.mtl.train import recog
-
-    else:
-        from espnet.asr.pytorch_backend.w2v_recog import recog
+    from espnet.w2v.w2v import recog
 
     recog(args)
 

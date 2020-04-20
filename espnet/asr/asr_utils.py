@@ -515,7 +515,8 @@ def torch_resume(snapshot_path, trainer):
     """
     # load snapshot
     snapshot_dict = torch.load(snapshot_path, map_location=lambda storage, loc: storage)
-
+    import ipdb; ipdb.set_trace()
+    
     # restore trainer states
     d = NpzDeserializer(snapshot_dict['trainer'])
     d.load(trainer)

@@ -1,4 +1,5 @@
-import torch 
+import numpy as np
+import torch
 from torch import nn
 
 
@@ -11,26 +12,18 @@ def _recursive_to(xs, device):
         return {k: _recursive_to(v, device) for k, v in xs.items()}
     elif isinstance(xs, list):
         return [_recursive_to(x, device) for x in xs]
+    elif type(xs) == np.ndarray:
+        return xs
     else:
         raise TypeError(f"Valid types: tensor, tuple, dict, list. Got {type(xs)}")
 
 
-def Embedding(num_embeddings, embedding_dim, eos_idx, eos_value=0):
-    m = nn.Embedding(num_embeddings, embedding_dim)
-    nn.init.uniform_(m.weight, -0.1, 0.1)
-    nn.init.constant_(m.weight[eos_idx], eos_value)
-    return m
-
-
-def load_pretrained_embedding_from_file(embed_path, vocab, freeze=True, eos_idx=-1, eos_value=0):
+def load_pretrained_embedding_from_file(embed_path, vocab, freeze=True):
     vocab = vocab.copy()
     num_embeddings = len(vocab)
-    # eos_idx MUST be -1 (= the last one) otherwise, we will have a clash with the other indices
-    # Note: can be easily solved in load_embedding, but does not matter a.t.m.
-    assert eos_idx == -1 or eos_idx == num_embeddings - 1
     embed_dict = parse_embedding(embed_path)
     embed_dim = embed_dict[list(embed_dict)[0]].size(0)
-    embed_tokens = Embedding(num_embeddings, embed_dim, eos_idx, eos_value)
+    embed_tokens = nn.Embedding(num_embeddings, embed_dim)
     embed_tokens.weight.requires_grad = not freeze
     return load_embedding(embed_dict, vocab, embed_tokens)
 

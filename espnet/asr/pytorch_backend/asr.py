@@ -175,8 +175,6 @@ def train(args):
 
     # MODEL AND OPTIMIZER CONFIGURATION
     model = build_model(idim_list, odim, args)
-    for line in str(model).split("\n"):
-        logging.info(line)
         
     reporter = model.reporter
     model = model.to(device=device, dtype=dtype)
