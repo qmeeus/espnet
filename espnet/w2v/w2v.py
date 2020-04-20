@@ -211,9 +211,9 @@ def recog(options):
     )
 
     decoder = model.decoder
-    clf = KNeighborsClassifier(n_neighbors=1, n_jobs=-1).fit(
-        decoder.embed.weight.cpu(), np.arange(len(decoder.char_list))
-    )
+    # clf = KNeighborsClassifier(n_neighbors=1, n_jobs=-1).fit(
+    #     decoder.embed.weight.cpu(), np.arange(len(decoder.char_list))
+    # )
 
     # FIXME DIRTY HACK:
     # Everything is kinda repeated and should be implemented / optimised in the model methods
@@ -227,45 +227,45 @@ def recog(options):
             batch_size = len(X)
             end = start + batch_size
 
-            sentences = [y[y != decoder.ignore_id] for y in y]
-            prev_output_tokens = decoder._add_sos_token(sentences, pad=True, pad_value=decoder.eos)
+            # sentences = [y[y != decoder.ignore_id] for y in y]
+            # prev_output_tokens = decoder._add_sos_token(sentences, pad=True, pad_value=decoder.eos)
 
-            eos_tokens = torch.ones_like(y[:, :1]) * decoder.eos
-            target = torch.cat([y.masked_fill(y == -1, decoder.eos), eos_tokens], -1)
+            # eos_tokens = torch.ones_like(y[:, :1]) * decoder.eos
+            # target = torch.cat([y.masked_fill(y == -1, decoder.eos), eos_tokens], -1)
 
-            for tensor_name, tensor in zip(("X", "Xlens", "y", "prev_output_tokens"), (X, Xlens, y, prev_output_tokens)):
-                logging.info(f"{tensor_name}: {tensor.type()} {tensor.size()}")
+            # for tensor_name, tensor in zip(("X", "Xlens", "y", "prev_output_tokens"), (X, Xlens, y, prev_output_tokens)):
+            #     logging.info(f"{tensor_name}: {tensor.type()} {tensor.size()}")
 
-            y_pred, att = model.evaluate(X, Xlens, prev_output_tokens)
-            att = torch.stack(att).transpose(0, 1).detach().cpu().numpy()
+            att = model.evaluate(X, Xlens, y, ylens)
+            # att = torch.stack(att).transpose(0, 1).detach().cpu().numpy()
 
-            target_mask = (target == decoder.eos)
-            target_emb = decoder.embed(target)
+            # target_mask = (target == decoder.eos)
+            # target_emb = decoder.embed(target)
 
-            losses = F.mse_loss(target_emb, y_pred, reduction="none").mean(-1)
-            loss = (losses.masked_fill(target_mask, 0).sum(-1) / (ylens + 1)).mean()
+            # losses = F.mse_loss(target_emb, y_pred, reduction="none").mean(-1)
+            # loss = (losses.masked_fill(target_mask, 0).sum(-1) / (ylens + 1)).mean()
 
-            logging.info(f"Loss: {loss:.4f}")
+            # logging.info(f"Loss: {loss:.4f}")
 
-            predictions = y_pred.detach().cpu().numpy()
+            # predictions = y_pred.detach().cpu().numpy()
 
-            target_sentence = decoder.tokens_to_string(target[-1])
-            predicted_sentence = decoder.tokens_to_string(clf.predict(predictions[-1]))
+            # target_sentence = decoder.tokens_to_string(target[-1])
+            # predicted_sentence = decoder.tokens_to_string(clf.predict(predictions[-1]))
 
-            logging.info(f"Target: {target_sentence}")
-            logging.info(f"Prediction: {predicted_sentence}")
+            # logging.info(f"Target: {target_sentence}")
+            # logging.info(f"Prediction: {predicted_sentence}")
 
             import ipdb; ipdb.set_trace()
 
             # predicted_tokens = clf.predict(predictions.reshape(-1, predictions.shape[-1])).reshape(predictions.shape[:-1])
             # accuracy = (predicted_tokens == target).mean()
 
-            target_emb = target_emb.detach().cpu().numpy()
+            # target_emb = target_emb.detach().cpu().numpy()
 
-            np.save(f"{options.outdir}/id_batch{i}.npy", uttids)
+            # np.save(f"{options.outdir}/id_batch{i}.npy", uttids)
             np.save(f"{options.outdir}/att_weights_batch{i}.npy", att)
-            np.save(f"{options.outdir}/predictions_batch{i}.npy", predictions)
-            np.save(f"{options.outdir}/target_batch{i}.npy", target_emb)
-            np.save(f"{options.outdir}/target_lengths{i}.npy", ylens.cpu().detach().numpy())
+            # np.save(f"{options.outdir}/predictions_batch{i}.npy", predictions)
+            # np.save(f"{options.outdir}/target_batch{i}.npy", target_emb)
+            # np.save(f"{options.outdir}/target_lengths{i}.npy", ylens.cpu().detach().numpy())
 
             start = end

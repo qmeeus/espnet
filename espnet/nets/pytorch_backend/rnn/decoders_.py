@@ -13,7 +13,7 @@ from argparse import Namespace
 
 from espnet.nets.pytorch_backend.rnn.attentions import att_to_numpy
 from espnet.nets.pytorch_backend.initialization import set_forget_bias_to_one
-from espnet.nets.pytorch_backend.nets_utils import pad_list
+from espnet.nets.pytorch_backend.nets_utils import pad_list, make_pad_mask
 from espnet.utils.torch_utils import load_pretrained_embedding_from_file
 
 MAX_DECODER_OUTPUT = 5
@@ -81,13 +81,12 @@ class Decoder(nn.Module):
 
         self.attention = att
         self.dunits = dunits
-        self.sos = sos
-        self.eos = eos
-        self.pad = 0
         self.odim = odim
         self.verbose = verbose
         self.char_list = char_list
-
+        self.sos = sos
+        self.eos = eos
+        self.pad = self.char_list.index("<pad>")
         self.sampling_probability = sampling_probability
         self.dropout = dropout
         self.num_encs = num_encs
@@ -116,7 +115,7 @@ class Decoder(nn.Module):
 
         return hidden_states
         
-    def forward(self, hs_pad, hlens, prev_output_tokens, strm_idx=0):
+    def forward(self, hs_pad, hlens, prev_output_tokens, ylens, strm_idx=0):
         """Decoder forward
 
         :param torch.Tensor hs_pad: batch of padded hidden state sequences (B, Tmax, D)
@@ -177,33 +176,32 @@ class Decoder(nn.Module):
             decoder_outputs.append(dec_out)
 
         decoder_outputs = torch.stack(decoder_outputs, dim=1).view(batch_size, max_output_length, -1)
-        return self.output_activation(self.output(decoder_outputs)), attention_weights
+        decoder_outputs = self.output_activation(self.output(decoder_outputs))
+        decoder_outputs.masked_fill_(make_pad_mask(ylens, decoder_outputs, 1), 0)
+        return decoder_outputs, attention_weights
 
-    def compute_loss(self, hs_pad, hlens, ys_pad, strm_idx=0):
-        batch_size, max_output_length = ys_pad.size()
-        max_output_length += 1
-
+    def compute_loss(self, predictions, ys, ylens):
         # FIXME
-        ys = [y[y != self.ignore_id] for y in ys_pad]  # parse padded ys
-        ylens = torch.tensor(list(map(len, ys))).type_as(hlens)
-        prev_output_tokens = self._add_sos_token(ys, pad=True, pad_value=self.eos)
-        eos = ys_pad[0].new([self.eos])
+        # ys = [y[y != self.ignore_id] for y in ys_pad]  # parse padded ys
+        # ylens = torch.tensor(list(map(len, ys))).type_as(hlens)
+        # prev_output_tokens = self._add_sos_token(ys, pad=True, pad_value=self.eos)
+        eos = ylens.new([self.eos])
         target = [torch.cat([y, eos], dim=0) for y in ys]
         target_pad = pad_list(target, self.pad)
         target_mask = (target_pad == self.pad)
         target_emb = self.embed(target_pad)
 
         # get dim, length info
-        logging.debug(f"input lengths: {hlens[0]}.")
+        # logging.debug(f"input lengths: {hlens[0]}.")
         logging.debug(f"{self.__class__.__name__} output lengths: {[len(y) for y in target]}")
 
-        predictions, _ = self.forward(hs_pad, hlens, prev_output_tokens)
+        # predictions, _ = self.forward(hs_pad, hlens, prev_output_tokens)
 
         losses = F.mse_loss(target_emb, predictions, reduction="none").mean(-1)
         loss = (losses.masked_fill_(target_mask, 0).sum(-1) / ylens).mean()
 
         logging.debug('att loss:' + ''.join(str(loss.item()).split('\n')))
-        return loss, 0, 0
+        return {"loss": loss}
 
     def _add_eos_token(self, ys):
         """Append eos token to the target sequences and pad each sequence with pad token
@@ -218,7 +216,7 @@ class Decoder(nn.Module):
         return target_pad, target_mask
         
     def tokens_to_string(self, tokens):
-        return " ".join(self.char_list[token] for token in tokens)
+        return " ".join(self.char_list[token] for token in tokens if token != self.pad)
 
     def _sample_from_previous_output(self, prediction):
         logging.debug(' scheduled sampling ')
@@ -258,9 +256,9 @@ class Decoder(nn.Module):
         """
 
         ys = [y[y != self.ignore_id] for y in ys_pad]  # parse padded ys
-        # hlen should be list of list of integer
+        ylens = torch.tensor(list(map(len, ys))).type_as(hlens)
         prev_output_tokens = self._add_sos_token(ys, pad=True, pad_value=self.eos)
-        _, att_ws = self.forward(hs_pad, hlens, prev_output_tokens)
+        _, att_ws = self.forward(hs_pad, hlens, prev_output_tokens, ylens)
 
         # convert to numpy array with the shape (B, Lmax, Tmax)
         return att_to_numpy(att_ws, self.attention[0])

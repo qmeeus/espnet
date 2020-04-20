@@ -54,6 +54,9 @@ class E2E(torch.nn.Module):
 
     """
 
+    LOSS_NAMES = ["loss"]
+    METRIC_NAMES = []
+
     @staticmethod
     def add_arguments(parser):
         """Add arguments."""
@@ -202,11 +205,16 @@ class E2E(torch.nn.Module):
 
         # 1. Encoder
         hs_pad, hlens, _ = self.encoder(hs_pad, hlens)
-
         logging.debug(f"Enc out: {hs_pad.size()}")
 
+        # 2. Decoder
+        ys = [y[y != self.decoder.ignore_id] for y in ys_pad]  # parse padded ys
+        ylens = torch.tensor(list(map(len, ys))).type_as(hlens)
+        prev_output_tokens = self.decoder._add_sos_token(ys, pad=True, pad_value=self.eos)
+        dec_out, attn_weights = self.decoder(hs_pad, hlens, prev_output_tokens, ylens)
+
         # 2. Loss
-        losses = self.compute_loss(hs_pad, hlens, ys_pad)
+        losses = self.decoder.compute_loss(dec_out, ys, ylens)
 
         # 3. Metrics HACK
         if calc_metrics:
@@ -216,21 +224,47 @@ class E2E(torch.nn.Module):
             if compat_on:
                 # 4. Log metrics
                 self.log_metrics(output)
-            
+
             if not compat_on:
                 return output
 
         if compat_on:
-            return output["loss"]        
+            return output["loss"]
 
         return losses
 
-    def evaluate(self, xs_pad, ilens, ys_pad):
+    def evaluate(self, xs_pad, ilens, ys_pad, ylens):
+
+        from sklearn.neighbors import KNeighborsClassifier
+
+        nneighbors = KNeighborsClassifier(n_neighbors=1, n_jobs=-1).fit(
+            self.decoder.embed.weight.cpu(), np.arange(len(self.char_list))
+        )
+
         self.eval()
         with torch.no_grad():
+
             hs_pad, hlens, _ = self.encoder(xs_pad, ilens)
-            y_pred, att_ws = self.decoder(hs_pad, hlens, ys_pad)
-            return y_pred, att_ws
+            ys = [y[y != self.decoder.ignore_id] for y in ys_pad]  # parse padded ys
+            ylens = torch.tensor(list(map(len, ys))).type_as(hlens)
+            prev_output_tokens = self.decoder._add_sos_token(ys, pad=True, pad_value=self.eos)
+            dec_out, attn_weights = self.decoder(hs_pad, hlens, prev_output_tokens, ylens)
+            attn_weights = torch.stack(attn_weights).transpose(0, 1).detach().cpu().numpy()
+            losses = self.decoder.compute_loss(dec_out, ys, ylens)
+
+            predictions = dec_out.detach().cpu().numpy()
+
+            token2str = self.decoder.tokens_to_string
+            target_sentences = list(map(token2str, ys))
+            bs, olen, size = predictions.shape
+            predicted_tokens = nneighbors.predict(predictions.reshape(bs * olen, size)).reshape(bs, olen)
+            predicted_sentences = list(map(token2str, predicted_tokens))
+            for target_sentence, predicted_sentence in zip(target_sentences, predicted_sentences):
+                logging.info(f"Target: {target_sentence}")
+                logging.info(f"Prediction: {predicted_sentence}")
+                import ipdb; ipdb.set_trace()
+
+            return attn_weights
 
     def log_metrics(self, metrics):
         # FIXME: HACKY for compatibility with self.reporter
@@ -248,7 +282,7 @@ class E2E(torch.nn.Module):
 
 
     def compute_loss(self, hs_pad, hlens, ys_pad):
-        
+
         # 2. attention loss
         loss, accuracy, _ = self.decoder.compute_loss(hs_pad, hlens, ys_pad)
 

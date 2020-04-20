@@ -1,6 +1,7 @@
 import logging
 import torch
 import operator
+from itertools import product
 from chainer import training
 from chainer.training import extensions, triggers
 from tensorboardX import SummaryWriter
@@ -110,22 +111,40 @@ class CustomTrainer:
         else:
             att_reporter = None
 
-        report_keys = [
-                'epoch', 'iteration', 'main/loss', 'main/loss_ctc', 'main/loss_att',
-                'validation/main/loss', 'validation/main/loss_ctc', 'validation/main/loss_att',
-                'main/accuracy', 'validation/main/accuracy', 'main/cer_ctc', 'validation/main/cer_ctc',
-                'elapsed_time'
-            ]
+        format_metric = "/".join
 
-        loss_plot_keys = [
-            'main/loss', 'validation/main/loss', 'main/loss_ctc', 'validation/main/loss_ctc', 
-            'main/loss_att', 'validation/main/loss_att'
+        prefixes = ['main', 'validation/main']
+
+        losses, metrics = [
+            list(map("/".join, product(prefixes, names))) 
+            for names in (self.model.LOSS_NAMES, self.model.METRIC_NAMES)
         ]
+
+        report_keys = ['epoch', 'iteration', *losses, *metrics, 'elasped_time']
+
+        # report_keys = [
+        #         'epoch', 'iteration', 'main/loss', 'main/loss_ctc', 'main/loss_att',
+        #         'validation/main/loss', 'validation/main/loss_ctc', 'validation/main/loss_att',
+        #         'main/accuracy', 'validation/main/accuracy', 'main/cer_ctc', 'validation/main/cer_ctc',
+        #         'elapsed_time'
+        #     ]
+
+
+        loss_plot_keys = losses
+        # loss_plot_keys = [
+        #     'main/loss', 'validation/main/loss', 'main/loss_ctc', 'validation/main/loss_ctc', 
+        #     'main/loss_att', 'validation/main/loss_att'
+        # ]
     
         acc_plot_keys, cer_plot_keys = (
-            [f'main/{metric}', f'validation/main/{metric}'] 
-            for metric in ('accuracy', 'cer_ctc')
+            [metric for metric in metrics if mname in metric]
+            for mname in ("accuracy", "cer_ctc")
         )
+
+        # acc_plot_keys, cer_plot_keys = (
+        #     [f'main/{metric}', f'validation/main/{metric}'] 
+        #     for metric in ('accuracy', 'cer_ctc')
+        # )
 
         # Resume from a snapshot
         # if args.resume:
@@ -147,9 +166,10 @@ class CustomTrainer:
 
         # Make a plot for training and validation values
         for keys, metric in zip([loss_plot_keys, acc_plot_keys, cer_plot_keys], ['loss', 'accuracy', 'cer']):
-            self.add_extension(
-                extensions.PlotReport(keys, 'epoch', file_name=f'{metric}.png')
-            )
+            if keys:
+                self.add_extension(
+                    extensions.PlotReport(keys, 'epoch', file_name=f'{metric}.png')
+                )
     
         # Write a log of evaluation statistics for each epoch
         self.add_extension(
@@ -163,7 +183,7 @@ class CustomTrainer:
         )
 
 
-        if args.mtl_mode != 'ctc':
+        if args.mtl_mode != 'ctc' and acc_plot_keys:
             self.add_extension(
                 snapshot_object(self.model, 'model.acc.best'), 
                 trigger=triggers.MaxValueTrigger('validation/main/accuracy')
@@ -183,31 +203,22 @@ class CustomTrainer:
         if args.opt == 'adadelta':
 
             if args.criterion == 'accuracy' and args.mtl_mode != 'ctc':
+                trigger_best = CompareValueTrigger('validation/main/accuracy', operator.gt)
+                snapshot_name = 'model.acc.best'
 
-                best_acc_trigger = CompareValueTrigger('validation/main/accuracy', operator.gt)
+            else:  # args.criterion == 'loss'
+                trigger_best = CompareValueTrigger('validation/main/loss', operator.lt)
+                snapshot_name = 'model.loss.best'
 
-                self.add_extension(
-                    restore_snapshot(self.model, args.outdir + '/model.acc.best', load_fn=torch_load), 
-                    trigger=best_acc_trigger
-                )
-                
-                self.add_extension(
-                    adadelta_eps_decay(args.eps_decay), 
-                    trigger=best_acc_trigger
-                )
+            self.add_extension(
+                restore_snapshot(self.model, f"{args.outdir}/{snapshot_name}", load_fn=torch_load), 
+                trigger=trigger_best
+            )
 
-            elif args.criterion == 'loss':
-                best_loss_trigger = CompareValueTrigger('validation/main/loss', operator.lt)
-
-                self.add_extension(
-                    restore_snapshot(self.model, args.outdir + '/model.loss.best', load_fn=torch_load), 
-                    trigger=best_loss_trigger
-                )
-
-                self.add_extension(
-                    adadelta_eps_decay(args.eps_decay), 
-                    trigger=best_loss_trigger
-                )
+            self.add_extension(
+                adadelta_eps_decay(args.eps_decay), 
+                trigger=trigger_best
+            )
         
             def get_obs_value(trainer): 
                 return trainer.updater.get_optimizer('main').param_groups[0]["eps"]
