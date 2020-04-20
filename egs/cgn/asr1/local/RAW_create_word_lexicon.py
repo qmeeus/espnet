@@ -28,7 +28,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--vocab-file", type=Path,
-                        default="data/lang_word/CGN_train_word_units.txt", 
+                        default="data/lang_word/CGN_train_word_units.txt",
                         help="Where to save the vocabulary file")
 
     parser.add_argument("--embeddings", type=absolute_path,
@@ -42,30 +42,35 @@ def parse_args():
 
     parser.add_argument("--eos", default="</s>", type=str, help="EOS symbol")
     parser.add_argument("--eos-index", default=-1, type=int, help="EOS index (-1 for last)")
+    parser.add_argument("--eos-value", default=None, type=float, help="EOS value (constant)")
+    parser.add_argument("--pad", default="<pad>", type=str, help="PAD symbol")
+    parser.add_argument("--pad-index", default=0, type=int, help="PAD index (-1 for last)")
+    parser.add_argument("--pad-value", default=0, type=float, help="PAD value (constant)")
     parser.add_argument("--unk", default="<unk>", type=str, help="UNK symbol")
     parser.add_argument("--unk-index", default=0, type=int, help="UNK index (-1 for last)")
+    parser.add_argument("--unk-value", default=None, type=float, help="UNK value (constant)")
 
-    parser.add_argument("--datatags", nargs="*", default=["all", "o", "ok", "mono"], 
+    parser.add_argument("--datatags", nargs="*", default=["all", "o", "ok", "mono"],
                         help="The tag of the dataset, used to identify the json file")
 
     parser.add_argument("--source-dataset", type=str,
-                        default="data_unigram_1000.{}.json", 
+                        default="data_unigram_1000.{}.json",
                         help="What json file to use in the data directory. "
                         "{} is replaced by one of DATATAGS and should be escaped in bash.")
-    
+
     parser.add_argument("--subsets", nargs="*",
                         default=["train", "valid", "test"],
                         help="Which subsets to process")
 
-    parser.add_argument("--dataset-path", type=str, 
-                        default="dump/CGN_{}/deltafalse", 
+    parser.add_argument("--dataset-path", type=str,
+                        default="dump/CGN_{}/deltafalse",
                         help="How to find the right path to the dataset dump. "
                         "{} is replaced by one of SUBSETS and should be escaped in bash.")
 
-    parser.add_argument("--remove-dash", action="store_true", 
+    parser.add_argument("--remove-dash", action="store_true",
                         help="Replace dashes (-) with spaces in sentences before parsing")
 
-    parser.add_argument("--deaccent", action="store_true", 
+    parser.add_argument("--deaccent", action="store_true",
                         help="Remove accent from sentences")
 
     parser.add_argument("--unknown-action", default="drop",
@@ -74,12 +79,12 @@ def parse_args():
                         "drop: the sentence is not added to the dataset\n"
                         "ignore: the word is replaced with the special symbol <unk>")
 
-    parser.add_argument("--blacklist", nargs="*", 
-                        default=["xxx", "ggg"], 
+    parser.add_argument("--blacklist", nargs="*",
+                        default=["xxx", "ggg"],
                         help="Special words that if present will cause to drop the sentence.")
 
-    parser.add_argument("--ignored-words", nargs="*", 
-                        default=["uh", "mmh", "uhm"], 
+    parser.add_argument("--ignored-words", nargs="*",
+                        default=["uh", "mmh", "uhm"],
                         help="Special tokens that will be filtered out of the parsed sentence.")
 
     return parser.parse_args()
@@ -106,26 +111,28 @@ def split_sentence(sentence, remove_dash=False, deaccent=False, ignored_words=No
 
 
 def parse_sentence(sentence, word2token, tokenize=str.split, blacklist=None, unknown_action="drop", unk="<unk>"):
-    
+
     words = tokenize(sentence)
 
     if blacklist and any(word in blacklist for word in words):
         DROP_REASON["blacklist"] += 1
         return
-        
+
     unknown_words = [w for w in words if w not in word2token]
     if unknown_action == "drop" and unknown_words:
         DROP_REASON["unknown"] += 1
         for w in unknown_words:
             UNKNOWN_WORDS.add(w)
         return
-    
-    # HACK: unk_index will be None if not present but we don't care because the function should never arrive 
+    elif unknown_action == "ignore":
+        assert unk is not None
+
+    # HACK: unk_index will be None if not present but we don't care because the function should never arrive
     # there if there are unknown words. The unk is not in word2token only if unknown_action is drop
     unk_index = word2token.get(unk)
     tokens = list(map(lambda w: word2token[w] if w in word2token else unk_index, words))
     # assert all(token is not None for token in tokens)  # Sanity check, uncomment if you're not sure
-    
+
     return {
         "shape": [len(tokens), len(word2token)],
         "text": sentence,
@@ -136,7 +143,7 @@ def parse_sentence(sentence, word2token, tokenize=str.split, blacklist=None, unk
 
 def load_vocab(vocab_file):
     with open(vocab_file) as f:
-        return dict(map(str.split, map(str.strip, f)))
+        return dict(map(str.split, map(str.strip, f.readlines())))
 
 
 def build_vocab(sentences, known_words, output_file, tokenize=str.split,
@@ -148,10 +155,10 @@ def build_vocab(sentences, known_words, output_file, tokenize=str.split,
         counter.update(filter(lambda word: word in known_words, words))
 
     lexicon = sorted(counter)
-    
+
     for sym, idx in [(eos, eos_index), (unk, unk_index)]:
-        
-        if sym:    
+
+        if sym:
             lexicon.insert(idx if idx != -1 else len(lexicon), (
                 lexicon.pop(lexicon.index(sym))
                 if sym in lexicon else sym
@@ -161,10 +168,8 @@ def build_vocab(sentences, known_words, output_file, tokenize=str.split,
         for i, word in enumerate(lexicon, 1):
             f.write(f"{word} {i}\n")
 
-    print(f"Lexicon saved to {output_file}")
-    word2token = {word: i for i, word in enumerate(lexicon, 1)}
-    return word2token
-
+    print(f"Lexicon saved to {output_file} ({len(lexicon):,} words)")
+    return output_file
 
 def read_metadata(input_file:Path):
     with open(input_file) as infile:
@@ -185,7 +190,7 @@ if __name__ == '__main__':
         options.unk = None
 
     tokenize = partial(
-        split_sentence, 
+        split_sentence,
         remove_dash=options.remove_dash,
         deaccent=options.deaccent,
         ignored_words=options.ignored_words
@@ -199,9 +204,9 @@ if __name__ == '__main__':
         for subset in options.subsets
         for tag in options.datatags
     ])
-    
-    word2token = build_vocab(
-        sentences, 
+
+    vocab_file = build_vocab(
+        sentences,
         known_words,
         options.vocab_file,
         tokenize=tokenize,
@@ -211,24 +216,26 @@ if __name__ == '__main__':
         unk_index=options.unk_index
     )
 
-    print(f"Vocabulary size: {len(word2token):,}")
-
     from RAW_prune_word2vec import prune_word2vec
-    prune_word2vec(options.embeddings, options.vocab_file, sort=True)
+    special_symbols = {
+        options.eos: (options.eos_index, options.eos_value), 
+        options.pad: (options.pad_index, options.pad_value)
+    }
+    prune_word2vec(options.embeddings, options.vocab_file, sort=True, special_symbols=special_symbols)
 
     word2token = load_vocab(options.vocab_file)
 
     for tag in options.datatags:
         input_json = options.source_dataset.format(tag)
-        
+
         for subset in options.subsets:
-            
+
             total = ignored = 0
             data_dir = options.dataset_path.format(subset)
-            metadata = read_metadata(Path(data_dir, input_json))
-
+            metadata = read_metadata(Path(data_dir, input_json))["utts"]
+            new_dataset = {}
             ids, samples = map(list, zip(
-                *sorted(metadata["utts"].items(), key=lambda t: t[0])
+                *sorted(metadata.items(), key=lambda t: t[0])
             ))
 
             sentences = (sample["output"][0]["text"] for sample in samples)
@@ -236,9 +243,9 @@ if __name__ == '__main__':
             for uttid, sentence in progress_bar:
 
                 parsed = parse_sentence(
-                    sentence, word2token, 
-                    tokenize=tokenize, 
-                    blacklist=options.blacklist, 
+                    sentence, word2token,
+                    tokenize=tokenize,
+                    blacklist=options.blacklist,
                     unknown_action=options.unknown_action,
                     unk=options.unk
                 )
@@ -248,7 +255,8 @@ if __name__ == '__main__':
                     ignored += 1
                     continue
 
-                metadata["utts"][uttid]["output"][0] = dict(
+                new_dataset[uttid] = metadata[uttid]
+                new_dataset[uttid]["output"][0] = dict(
                     name="target1",
                     **parsed
                 )
@@ -257,9 +265,9 @@ if __name__ == '__main__':
 
             newfile = f"{data_dir}/data_words.{tag}.json"
             with open(newfile, "w") as outfile:
-                json.dump(metadata, outfile)
+                json.dump({"utts": new_dataset}, outfile)
 
-            print(f"{len(metadata['utts'])} utterances saved to {newfile}")
+            print(f"{len(new_dataset)} utterances saved to {newfile}")
 
     unknown_words_file = Path(options.vocab_file.parent, "unknown_words.txt")
     with open(unknown_words_file, "w") as f:

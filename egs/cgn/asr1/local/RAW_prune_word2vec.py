@@ -22,6 +22,8 @@ def load_vocab(vocab_file):
 
 def load_word2vec(w2v_file, vocab, special_symbols=None):
 
+    special_symbols = special_symbols or []
+
     with open(w2v_file, 'r', encoding='latin-1') as f:
         lines = f.readlines()
 
@@ -36,8 +38,9 @@ def load_word2vec(w2v_file, vocab, special_symbols=None):
 
     words, vectors = (np.array(l) for l in (words, vectors))
     assert vectors.shape == (len(vocab), dim)  # Sanity check
-    print(f"{vectors.shape[0];,} vectors loaded (dim={vectors.shape[1]})")
-    return words, vectors
+    print(f"{vectors.shape[0]:,} vectors loaded (dim={vectors.shape[1]})")
+    vocab = sorted(vocab)
+    return words.tolist(), vectors, vocab
 
 
 def sort_textfile(textfile, skiplines=0):
@@ -47,24 +50,34 @@ def sort_textfile(textfile, skiplines=0):
             && mv {textfile}_ {textfile}"""
     else:
         cmd = f"sort {textfile} > {textfile}_ && mv {textfile}_ {textfile}"
-    
+
     os.system(cmd)
 
 
-def prune_word2vec(w2v_file, vocab_file, sort=True, eos="</s>", unk="<unk>"):
+def prune_word2vec(w2v_file, vocab_file, sort=True, special_symbols=None):
     w2v_file, vocab_file = (Path(fn) for fn in (w2v_file, vocab_file))
     vocab = load_vocab(vocab_file)
-    words, vectors = load_word2vec(w2v_file, vocab, special_symbols=[eos, unk])
+    words, vectors, vocab = load_word2vec(
+        w2v_file, vocab, special_symbols=list(special_symbols) if special_symbols else None
+    )
 
-    new_name = Path(vocab_file.parent, "w2v_small.txt")
-    with open(new_name, 'w') as f:
-        f.write("{} {}\n".format(*vectors.shape))
-        for i in range(len(vectors)):
-            f.write(f"{words[i]} {' '.join(map(str, vectors[i]))}\n")
+    for sym, (index, value) in special_symbols.items():
+        index = index if index >= 0 else len(vocab)
+        if sym not in words:
+            assert value is not None
+            vocab.insert(index, sym)
+            words.append(sym)
+            vectors = np.concatenate([vectors, np.ones((1, vectors.shape[1])) * value], axis=0)
+        else:
+            vocab.insert(index, vocab.pop(vocab.index(sym)))
 
-    if sort:
-        sort_textfile(new_name, skiplines=1)
-        sort_textfile(vocab_file)
+    w2v_small = Path(vocab_file.parent, "w2v_small.txt")
+    with open(w2v_small, 'w') as w2v_file, open(vocab_file, "w") as voc_file:
+        w2v_file.write("{} {}\n".format(*vectors.shape))
+        for word_index, word in enumerate(vocab, 1):
+            # Make sure that every index match
+            voc_file.write(f"{word} {word_index}\n")
+            w2v_file.write(f"{word} {' '.join(map(str, vectors[words.index(word)]))}\n")
 
 
 if __name__ == '__main__':
@@ -75,11 +88,12 @@ if __name__ == '__main__':
         parser = argparse.ArgumentParser()
         parser.add_argument("w2v", type=absolute_path, help="path to word2vec vectors")
         parser.add_argument("vocab", type=absolute_path, help="path to vocab list")
-        parser.add_argument("--sort", action="store_true", 
-                            help="Sort output pruned vector file and vocab file.\n" 
+        parser.add_argument("--sort", action="store_true",
+                            help="Sort output pruned vector file and vocab file.\n"
                             "Note: If you already have tokenized your texts, it WILL mess up your data!")
         return parser.parse_args()
 
     args = parse_args()
     w2v_file, vocab_file = args.w2v, args.vocab
-    prune_word2vec(w2v_file, vocab_file, sort=args.sort)
+    special_symbols = {"</s>": (-1, None), "<pad>": (0, 0)}
+    prune_word2vec(w2v_file, vocab_file, sort=args.sort, special_symbols=special_symbols)
