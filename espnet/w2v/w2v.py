@@ -190,12 +190,6 @@ def train(options):
 
 
 def recog(options):
-    """Train with the given args.
-
-    Args:reporter
-        options (namespace): The program arguments.
-
-    """
 
     # SETUP AND PRELIMINARY OPERATIONS
     model, optimizer, converter, device = setup(options, train=False)
@@ -210,62 +204,35 @@ def recog(options):
         collate_fn=testing_set.collate_samples
     )
 
-    decoder = model.decoder
-    # clf = KNeighborsClassifier(n_neighbors=1, n_jobs=-1).fit(
-    #     decoder.embed.weight.cpu(), np.arange(len(decoder.char_list))
-    # )
+    dump_dir = f"{options.outdir}/dump"
+    os.makedirs(dump_dir, exist_ok=True)
 
-    # FIXME DIRTY HACK:
-    # Everything is kinda repeated and should be implemented / optimised in the model methods
+    all_outputs = {}
     with torch.no_grad():
-        start = 0
+
         for i, batch in enumerate(test_iter):
             batch = _recursive_to(batch, device)
             X, Xlens = batch["input1"], batch["input1_length"]
             y, ylens = batch["target1"], batch["target1_length"]
             uttids = batch["uttid"]
-            batch_size = len(X)
-            end = start + batch_size
 
-            # sentences = [y[y != decoder.ignore_id] for y in y]
-            # prev_output_tokens = decoder._add_sos_token(sentences, pad=True, pad_value=decoder.eos)
+            preds, attn, output = model.evaluate(X, Xlens, y, ylens)
+            all_outputs.update(dict(zip(uttids, [dict(zip(output, t)) for t in zip(*output.values())])))
 
-            # eos_tokens = torch.ones_like(y[:, :1]) * decoder.eos
-            # target = torch.cat([y.masked_fill(y == -1, decoder.eos), eos_tokens], -1)
+            for array, name in [(uttids, "uttids"), (preds, "preds"), (attn, "attn_ws")]:
+                np.save(f"{dump_dir}/{name}.{i:04}.npy", np.array(array))
+                
 
-            # for tensor_name, tensor in zip(("X", "Xlens", "y", "prev_output_tokens"), (X, Xlens, y, prev_output_tokens)):
-            #     logging.info(f"{tensor_name}: {tensor.type()} {tensor.size()}")
+    class Serializer(json.JSONEncoder):
+        def default(self, obj):
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            elif isinstance(obj, np.float32):
+                return float(obj)
+            return json.JSONEncoder.default(self, obj)
 
-            att = model.evaluate(X, Xlens, y, ylens)
-            # att = torch.stack(att).transpose(0, 1).detach().cpu().numpy()
 
-            # target_mask = (target == decoder.eos)
-            # target_emb = decoder.embed(target)
+    with open(f"{options.outdir}/results.json", "w") as f:
+        json.dump({"results": all_outputs}, f, indent=4, sort_keys=True, cls=Serializer)
 
-            # losses = F.mse_loss(target_emb, y_pred, reduction="none").mean(-1)
-            # loss = (losses.masked_fill(target_mask, 0).sum(-1) / (ylens + 1)).mean()
 
-            # logging.info(f"Loss: {loss:.4f}")
-
-            # predictions = y_pred.detach().cpu().numpy()
-
-            # target_sentence = decoder.tokens_to_string(target[-1])
-            # predicted_sentence = decoder.tokens_to_string(clf.predict(predictions[-1]))
-
-            # logging.info(f"Target: {target_sentence}")
-            # logging.info(f"Prediction: {predicted_sentence}")
-
-            import ipdb; ipdb.set_trace()
-
-            # predicted_tokens = clf.predict(predictions.reshape(-1, predictions.shape[-1])).reshape(predictions.shape[:-1])
-            # accuracy = (predicted_tokens == target).mean()
-
-            # target_emb = target_emb.detach().cpu().numpy()
-
-            # np.save(f"{options.outdir}/id_batch{i}.npy", uttids)
-            np.save(f"{options.outdir}/att_weights_batch{i}.npy", att)
-            # np.save(f"{options.outdir}/predictions_batch{i}.npy", predictions)
-            # np.save(f"{options.outdir}/target_batch{i}.npy", target_emb)
-            # np.save(f"{options.outdir}/target_lengths{i}.npy", ylens.cpu().detach().numpy())
-
-            start = end

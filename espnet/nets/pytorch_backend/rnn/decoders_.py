@@ -180,7 +180,7 @@ class Decoder(nn.Module):
         decoder_outputs.masked_fill_(make_pad_mask(ylens, decoder_outputs, 1), 0)
         return decoder_outputs, attention_weights
 
-    def compute_loss(self, predictions, ys, ylens):
+    def compute_loss(self, predictions, ys, ylens, reduction="mean"):
         # FIXME
         # ys = [y[y != self.ignore_id] for y in ys_pad]  # parse padded ys
         # ylens = torch.tensor(list(map(len, ys))).type_as(hlens)
@@ -197,10 +197,12 @@ class Decoder(nn.Module):
 
         # predictions, _ = self.forward(hs_pad, hlens, prev_output_tokens)
 
-        losses = F.mse_loss(target_emb, predictions, reduction="none").mean(-1)
-        loss = (losses.masked_fill_(target_mask, 0).sum(-1) / ylens).mean()
+        item_losses = F.mse_loss(target_emb, predictions, reduction="none").mean(-1)
+        seq_losses = (item_losses.masked_fill_(target_mask, 0).sum(-1) / ylens)
+        loss = getattr(seq_losses, reduction)() if reduction in ("sum", "mean") else seq_losses
 
-        logging.debug('att loss:' + ''.join(str(loss.item()).split('\n')))
+        if loss.ndim == 0:
+            logging.debug('att loss:' + ''.join(str(loss.item()).split('\n')))
         return {"loss": loss}
 
     def _add_eos_token(self, ys):

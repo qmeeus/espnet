@@ -244,27 +244,40 @@ class E2E(torch.nn.Module):
         self.eval()
         with torch.no_grad():
 
+            output = {}
+
             hs_pad, hlens, _ = self.encoder(xs_pad, ilens)
             ys = [y[y != self.decoder.ignore_id] for y in ys_pad]  # parse padded ys
             ylens = torch.tensor(list(map(len, ys))).type_as(hlens)
             prev_output_tokens = self.decoder._add_sos_token(ys, pad=True, pad_value=self.eos)
-            dec_out, attn_weights = self.decoder(hs_pad, hlens, prev_output_tokens, ylens)
-            attn_weights = torch.stack(attn_weights).transpose(0, 1).detach().cpu().numpy()
-            losses = self.decoder.compute_loss(dec_out, ys, ylens)
+            predictions, attn_weights = self.decoder(hs_pad, hlens, prev_output_tokens, ylens)
+            attention_weights = torch.stack(attn_weights).transpose(0, 1)
+            output["loss"] = self.decoder.compute_loss(predictions, ys, ylens, reduction="none")["loss"]
 
-            predictions = dec_out.detach().cpu().numpy()
-
+            attention_weights, output["loss"], predictions = (
+                t.detach().cpu().numpy() for t in (attention_weights, output["loss"], predictions)
+            )
+            
             token2str = self.decoder.tokens_to_string
             target_sentences = list(map(token2str, ys))
             bs, olen, size = predictions.shape
             predicted_tokens = nneighbors.predict(predictions.reshape(bs * olen, size)).reshape(bs, olen)
             predicted_sentences = list(map(token2str, predicted_tokens))
+            output["prediction_str"] = predicted_sentences
+            output["accuracy"], output["wer"] = [], []
             for target_sentence, predicted_sentence in zip(target_sentences, predicted_sentences):
                 logging.info(f"Target: {target_sentence}")
                 logging.info(f"Prediction: {predicted_sentence}")
-                import ipdb; ipdb.set_trace()
+                words_true, words_pred = (sent.split() for sent in (target_sentence, predicted_sentence))
 
-            return attn_weights
+                output["accuracy"].append(
+                    np.mean([word_true == word_pred 
+                    for word_true, word_pred in zip(words_true, words_pred)])
+                )
+
+                output["wer"].append(editdistance.eval(words_true, words_pred) / len(words_true))
+
+            return predictions, attention_weights, output
 
     def log_metrics(self, metrics):
         # FIXME: HACKY for compatibility with self.reporter
