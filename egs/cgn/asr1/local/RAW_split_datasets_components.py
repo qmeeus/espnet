@@ -1,23 +1,38 @@
 # coding: utf-8
 import json
 import pandas as pd
+import argparse
+from pathlib import Path
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("json_prefix", type=str, help="prefix of global json file")
+    parser.add_argument("--splits", type=Path, default="data/CGN_ALL/splits.csv", help="CSV file with splits")
+    parser.add_argument("--groups", nargs="*", default=["o", "ok", "ijklmno"], help="components to include in each dataset")
+    parser.add_argument("--group-names", nargs="*", default=["o", "ok", "mono"], help="dataset tags")
+    parser.add_argument("--dump", type=Path, default="dump", help="location of dump directory")
+    parser.add_argument("--subsets", nargs="*", default=["train", "valid"], help="subsets on which to apply the split")
+    args = parser.parse_args()
+    assert len(args.groups) == len(args.group_names)
+    return args
+
+def main():
+    options = parse_args()
+    splits = pd.read_csv(options.splits, index_col="uttid")
+    for subset in options.subsets:
+        subset_dir = Path(f"dump/CGN_{subset}/deltafalse")
+        with open(Path(subset_dir, f"{options.json_prefix}.json")) as f:
+            dataset = json.load(f)["utts"]
+
+        for group_name, group in zip(options.group_names, options.groups):
+            uttids = set(splits.loc[splits.comp.isin([f"comp-{x}" for x in list(group)])].index)
+            selection = {uttid: utt for uttid, utt in dataset.items() if uttid in uttids}
+            filename = Path(subset_dir, f"{options.json_prefix}.{group_name}.json")
+            with open(filename, "w") as outfile:
+                json.dump({"utts": selection}, outfile, indent=4, sort_keys=True)
+            
+            print(f"{len(selection)} items saved to {filename}")
 
 
-splits = pd.read_csv("data/CGN_ALL/splits.csv", index_col="uttid")
-for split in ("train", "valid", "test"):
-
-    with open(f"dump/CGN_{split}/deltafalse/data_unigram_1000.json") as f:
-        subset = json.load(f)["utts"]
-
-    groups = ["o", "ok", "ijklmno"]
-    group_names = ["o", "ok", "mono"]
-
-    for group_name, group in zip(group_names, groups):
-        uttids = set(splits.loc[splits.comp.isin([f"comp-{x}" for x in list(group)])].index)
-        selection = {uttid: utt for uttid, utt in subset.items() if uttid in uttids}
-        filename = f"dump/CGN_{split}/deltafalse/data_unigram_1000.{group_name}.json"
-        print(filename, len(selection))
-
-        with open(filename, "w") as f:
-            json.dump({"utts": selection}, f)
-
+if __name__ == "__main__":
+    main()
