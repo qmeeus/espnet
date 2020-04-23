@@ -61,6 +61,9 @@ class E2E(ASRInterface, torch.nn.Module):
 
     """
 
+    LOSS_NAMES = ["loss", "loss_ctc", "loss_att"]
+    METRIC_NAMES = ["accuracy", "cer_ctc"]
+
     @staticmethod
     def add_arguments(parser):
         """Add arguments."""

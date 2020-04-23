@@ -128,7 +128,7 @@ CONFIG = {
     "threshold": dict(default=1e-4, type=float, help='Threshold to stop iteration'),
     "epochs": dict(default=30, type=int, help='Maximum number of epochs'),
     "early-stop-criterion": dict(
-        default='validation/main/accuracy', type=str, nargs='?',
+        default='validation/main/loss', type=str, nargs='?',
         help="Value to monitor to trigger an early stopping of the training"),
     "patience": dict(default=3, type=int, nargs='?', help="Number of epochs to wait without improvement before stopping the training"),
     "grad-clip": dict(default=5, type=float, help='Gradient norm threshold to clip'),
