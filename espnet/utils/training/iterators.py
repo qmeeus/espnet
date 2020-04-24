@@ -25,6 +25,9 @@ class ShufflingEnabler(Extension):
         """
         if not self.set:
             for iterator in self.iterators:
+                # HACK to fix AttributeError: 'dict' object has no attribute 'start_shuffle'
+                if isinstance(iterator, dict):
+                    iterator = iterator["main"]
                 iterator.start_shuffle()
             self.set = True
 
