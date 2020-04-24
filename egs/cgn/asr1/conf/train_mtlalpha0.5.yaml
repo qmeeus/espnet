@@ -3,20 +3,22 @@ batch-size: 30
 maxlen-in: 800  # if input length  > maxlen_in, batchsize is automatically reduced
 maxlen-out: 150 # if output length > maxlen_out, batchsize is automatically reduced
 # optimization related
-sortagrad: 0 # Feed samples from shortest to longest ; -1: enabled for all epochs, 0: disabled, other: enabled for 'other' epochs
+sortagrad: -1 # Feed samples from shortest to longest ; -1: enabled for all epochs, 0: disabled, other: enabled for 'other' epochs
 opt: adadelta
-epochs: 20
-patience: 3
+epochs: 1000
+patience: 5
 
 # scheduled sampling option
 sampling-probability: 0.0
 
 # encoder related
-etype: vggblstmp     # encoder architecture type
+etype: blstmp     # encoder architecture type
 elayers: 4
 eunits: 320
 eprojs: 320
-subsample: "1_2_2_1_1" # skip every n frame from input to nth layers
+subsample: "1_2_2_2_1" # skip every n frame from input to nth layers
+encoder-dropout: .1
+
 # decoder related
 dlayers: 1
 dunits: 300
