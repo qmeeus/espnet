@@ -11,6 +11,7 @@ from torch.nn import functional as F
 
 from argparse import Namespace
 
+from espnet.nets.pytorch_backend.initialization import lecun_normal_init_parameters
 from espnet.nets.pytorch_backend.rnn.attentions import att_to_numpy
 from espnet.nets.pytorch_backend.initialization import set_forget_bias_to_one
 from espnet.nets.pytorch_backend.nets_utils import pad_list, make_pad_mask
@@ -58,6 +59,7 @@ class Decoder(nn.Module):
         self.embed = load_pretrained_embedding_from_file(EMB_PATH, char_list, freeze=True)
 
         self.dropout_emb = nn.Dropout(p=dropout)
+        self.attention = att
 
         RNN = nn.LSTM if self.rnn_type == "lstm" else nn.GRU
         self.rnn = RNN(
@@ -79,7 +81,6 @@ class Decoder(nn.Module):
         # self.output_activation = nn.Tanh()
         self.output_activation = nn.Identity()
 
-        self.attention = att
         self.dunits = dunits
         self.odim = odim
         self.verbose = verbose
@@ -94,6 +95,8 @@ class Decoder(nn.Module):
         self.logzero = -1e10
 
     def init_weights(self):
+        lecun_normal_init_parameters(self.attention)
+
         # forget-bias = 1.0
         # https://discuss.pytorch.org/t/set-forget-gate-bias-of-lstm/1745
         for layer in range(self.num_layers):

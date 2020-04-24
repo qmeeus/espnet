@@ -83,7 +83,7 @@ class PyramidalRNNLayer(nn.Module):
                  hidden_size, 
                  output_dim, 
                  subsampling, 
-                 dropout=.1, 
+                 dropout=0., 
                  recurrent_unit_type="lstm", 
                  bidirectional=True, 
                  output_activation=None):
@@ -167,7 +167,6 @@ class PyramidalRNN(nn.Module):
                  dropout=.1):
 
         super(PyramidalRNN, self).__init__()
-
         assert len(subsampling) == num_layers + 1
 
         self.layers = nn.ModuleList([
@@ -288,7 +287,8 @@ def reset_backward_rnn_state(states):
     return states
 
 
-def encoder_for(input_dim, args):
+def encoder_for(args, input_dim, subsample=None):
+    # HACK: subsample arg kept for compatibility
     # HACK: the encoder_type should no require parsing + improve arg structure
 
     def parse_encoder_type(encoder_type):
@@ -309,7 +309,7 @@ def encoder_for(input_dim, args):
         hidden_units=args.eunits,
         output_dim=args.eprojs,
         num_layers=args.elayers,
-        subsampling=args.subsample,
-        dropout=args.dropout_rate,
+        subsampling=subsample if subsample is not None else args.subsample,
+        dropout=args.encoder_dropout,
         **parse_encoder_type(args.etype)
     )

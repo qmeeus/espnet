@@ -160,9 +160,9 @@ class E2E(torch.nn.Module):
         # encoder
         self.encoder = encoder_for(args, idim, self.subsample)
         # attention
-        self.attention = att_for(args)
+        attention = att_for(args)
         # decoder
-        self.decoder = decoder_for(args, odim, self.sos, self.eos, self.attention)
+        self.decoder = decoder_for(args, odim, self.sos, self.eos, attention)
 
         # weight initialization
         self.init_like_chainer()
@@ -182,7 +182,6 @@ class E2E(torch.nn.Module):
         - LSTM.upward.b[forget_gate_range] = 1 (but not used in NStepLSTM)
         """
         lecun_normal_init_parameters(self.encoder)
-        lecun_normal_init_parameters(self.attention)
         self.decoder.init_weights()
 
     def forward(self, xs_pad, ilens, ys_pad, ylens=None, calc_metrics=False, compat_on=True):

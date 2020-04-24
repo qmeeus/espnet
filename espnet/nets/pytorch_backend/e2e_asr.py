@@ -34,7 +34,7 @@ from espnet.nets.pytorch_backend.nets_utils import to_device
 from espnet.nets.pytorch_backend.nets_utils import to_torch_tensor
 from espnet.nets.pytorch_backend.rnn.attentions import att_for
 from espnet.nets.pytorch_backend.rnn.decoders import decoder_for
-from espnet.nets.pytorch_backend.rnn.encoders import encoder_for
+from espnet.nets.pytorch_backend_.rnn.encoders import encoder_for
 from espnet.nets.scorers.ctc import CTCPrefixScorer
 
 
@@ -77,10 +77,10 @@ class E2E(ASRInterface, torch.nn.Module):
         """Add arguments for the encoder."""
         group = parser.add_argument_group("E2E encoder setting")
         # encoder
-        group.add_argument('--etype', default='blstmp', type=str,
-                           choices=['lstm', 'blstm', 'lstmp', 'blstmp', 'vgglstmp', 'vggblstmp', 'vgglstm', 'vggblstm',
-                                    'gru', 'bgru', 'grup', 'bgrup', 'vgggrup', 'vggbgrup', 'vgggru', 'vggbgru'],
-                           help='Type of encoder network architecture')
+        group.add_argument('--etype', default='blstmp', type=str, choices=[
+            'lstm', 'blstm', 'lstmp', 'blstmp', 'vgglstmp', 'vggblstmp', 'vgglstm', 'vggblstm',
+            'gru', 'bgru', 'grup', 'bgrup', 'vgggrup', 'vggbgrup', 'vgggru', 'vggbgru'
+        ], help='Type of encoder network architecture')
         group.add_argument('--elayers', default=4, type=int,
                            help='Number of encoder layers (for shared recognition part in multi-speaker asr mode)')
         group.add_argument('--eunits', '-u', default=300, type=int,
@@ -148,13 +148,22 @@ class E2E(ASRInterface, torch.nn.Module):
         """
         super(E2E, self).__init__()
         torch.nn.Module.__init__(self)
+
+        # Setup multitask learning loss 
         self.mtlalpha = args.mtlalpha
         assert 0.0 <= self.mtlalpha <= 1.0, "mtlalpha should be [0.0, 1.0]"
+
+        # Remove unused metrics
+        if self.mtlalpha == 1:
+            self.LOSS_NAMES.remove("loss_att"); self.METRIC_NAMES.remove("accuracy")
+        if self.mtlalpha == 0:
+            self.LOSS_NAMES.remove("loss_ctc"); self.METRIC_NAMES.remove("cer_ctc")
+
         self.etype = args.etype
         self.verbose = args.verbose
+
         # NOTE: for self.build method
-        args.char_list = getattr(args, "char_list", None)
-        self.char_list = args.char_list
+        self.char_list = args.char_list = getattr(args, "char_list", None)
         self.outdir = args.outdir
         self.space = args.sym_space
         self.blank = args.sym_blank
@@ -181,9 +190,9 @@ class E2E(ASRInterface, torch.nn.Module):
         # ctc
         self.ctc = ctc_for(args, odim)
         # attention
-        self.attention = att_for(args)
+        attention = att_for(args)
         # decoder
-        self.decoder = decoder_for(args, odim, self.sos, self.eos, self.attention, labeldist)
+        self.decoder = decoder_for(args, odim, self.sos, self.eos, attention, labeldist)
 
         # weight initialization
         self.init_like_chainer()
@@ -227,6 +236,7 @@ class E2E(ASRInterface, torch.nn.Module):
         :return: loss value
         :rtype: torch.Tensor
         """
+
         alpha = self.mtlalpha
 
         # HACK

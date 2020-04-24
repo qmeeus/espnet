@@ -36,7 +36,7 @@ class E2E(nn.Module):
     """
 
     LOSS_NAMES = ["loss", "loss_ctc", "loss_att"]
-    METRIC_NAMES = ["cer_ctc", "cer", "wer"]
+    METRIC_NAMES = ["accuracy", "cer_ctc"]
 
     @staticmethod
     def add_arguments(parser):
@@ -52,7 +52,7 @@ class E2E(nn.Module):
         group = parser.add_argument_group("E2E encoder setting")
         # encoder
         group.add_argument('--etype', default='blstmp', type=str, choices=[
-            'lstm', 'blstm', 'lstmp', 'blstmp', 'vgglstmp', 'vggblstmp', 'vgglstm', 'vggblstm', 
+            'lstm', 'blstm', 'lstmp', 'blstmp', 'vgglstmp', 'vggblstmp', 'vgglstm', 'vggblstm',
             'gru', 'bgru', 'grup', 'bgrup', 'vgggrup', 'vggbgrup', 'vgggru', 'vggbgru'
         ], help='Type of encoder network architecture')
         group.add_argument('--elayers', default=4, type=int,
@@ -96,7 +96,7 @@ class E2E(nn.Module):
                            help='Number of decoder layers')
         group.add_argument('--dunits', default=320, type=int,
                            help='Number of decoder hidden units')
-        group.add_argument('--dropout-rate-decoder', default=0.0, type=float,
+        group.add_argument('--decoder-dropout', default=0.0, type=float,
                            help='Dropout rate for the decoder')
         group.add_argument('--sampling-probability', default=0.0, type=float,
                            help='Ratio of predicted labels fed back to decoder')
@@ -143,7 +143,7 @@ class E2E(nn.Module):
         
         # attention & decoder
         if self.mtlalpha < 1:
-            self.attention = att_for(args)        
+            self.attention = att_for(args)
             self.decoder = decoder_for(args, output_dim, self.sos, self.eos, self.attention, labeldist)
 
         # weight initialization
