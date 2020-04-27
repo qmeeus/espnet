@@ -11,7 +11,7 @@ Initialdir          = {project_root}
 Executable          = {command} 
 Arguments           = {command_args}
 
-Notification        = Error
+Notification        = Complete
 Log                 = {logfile}
 Output              = {stdout} 
 Error               = {stderr}
