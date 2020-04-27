@@ -9,7 +9,7 @@
 set -u
 set -o pipefail
 
-validset_tag=all
+validset_tag=${validset_tag:-all}
 dict=data/lang_word/CGN_train_word_units.txt
 json_prefix="data_words"
 # export TGT_WORDS=1
@@ -22,7 +22,7 @@ train_features=dump/${train_set}/deltafalse
 dev_features=dump/${dev_set}/deltafalse
 
 i=0
-PRETRAINED_MODEL=exp/train_lstm_mtlalpha0.1_unigram_1000_data_all.2/results/model.loss.best
+PRETRAINED_MODEL=${resume:-exp/train_lstm_mtlalpha0.1_unigram_1000_data_all.2/results/model.loss.best}
 # PRETRAINED_MODEL=exp/train_lstm_words_pretrained_curriculum/v1/train/mono/results/snapshot.ep.20
 for dataset_tag in o ok mono all; do 
 
@@ -33,6 +33,8 @@ for dataset_tag in o ok mono all; do
   OPTIONS="--enc-init $PRETRAINED_MODEL"
 
   if (( $i > 0 )); then
+    OPTIONS="$OPTIONS --dec-init $PRETRAINED_MODEL"
+  elif [ "$resume" ]; then
     OPTIONS="$OPTIONS --dec-init $PRETRAINED_MODEL"
   fi
 
@@ -51,7 +53,6 @@ for dataset_tag in o ok mono all; do
       --debugdir $outdir \
       --minibatches ${N} \
       --verbose $verbose \
-      --resume ${resume} \
       --train-json ${train_features}/${json_prefix}.${dataset_tag}.json \
       --valid-json ${dev_features}/${json_prefix}.${validset_tag}.json $OPTIONS \
     | tee $outdir/train.log 

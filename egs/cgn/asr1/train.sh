@@ -63,7 +63,7 @@ fi
 mkdir -p $output_dir
 
 (
-  
+
   $SCRIPT \
     --v1 \
     --config ${train_config} \
