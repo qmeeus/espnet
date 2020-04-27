@@ -1,5 +1,6 @@
 import logging
 import numpy as np
+import torch
 from torch import nn
 from torch.nn import functional as F
 
@@ -8,15 +9,15 @@ class VGG2L(nn.Module):
 
     # TODO: test
 
-    def __init__(self, in_channels=1, **kwargs):
+    def __init__(self, in_channels=1, **options):
         super(VGG2L, self).__init__()
 
         # HACK (compat)
 
-        filters = kwargs.get('filters', [64, 128])
-        kernel_sizes = kwargs.get("kernel_sizes", [3, 3])
-        strides = kwargs.get("strides", [1, 1])
-        paddings = kwargs.get("paddings", [1, 1])
+        filters = options.get('filters', [64, 128])
+        kernel_sizes = options.get("kernel_sizes", [3, 3])
+        strides = options.get("strides", [1, 1])
+        paddings = options.get("paddings", [1, 1])
 
         self.layers = nn.ModuleList([
             self.conv_layer(
@@ -32,7 +33,7 @@ class VGG2L(nn.Module):
 
         self.in_channels = in_channels
 
-    def forward(self, xs_pad, ilens, **kwargs):
+    def forward(self, xs_pad, ilens, **options):
         """VGG2L forward
 
         :param torch.Tensor xs_pad: batch of padded input sequences (B, Tmax, D)
@@ -47,7 +48,7 @@ class VGG2L(nn.Module):
         # xs_pad = F.pad_sequence(xs_pad)
 
         # x: utt x 1 (input channel num) x frame x dim
-        xs_pad = xs_pad.view(*xs_pad.size()[:2], self.in_channel, -1).transpose(1, 2)
+        xs_pad = xs_pad.view(*xs_pad.size()[:2], self.in_channels, -1).transpose(1, 2)
         xs_pad = self.layers(xs_pad)
         
         def compute_lengths(lengths, subsampling=2):
