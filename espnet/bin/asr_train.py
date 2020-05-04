@@ -144,6 +144,7 @@ CONFIG = {
     # Encoder
     "use-frontend": dict(type=strtobool, default=False, help='The flag to switch to use frontend system.'),
     "num-encs": dict(default=1, type=int, help='Number of encoders in the model.'),
+    "freeze-encoder": dict(type=int, default=0, help="Number of epoch for which the encoder is not updated"),
 
     # Decoder
     "context-residual": dict(default=False, type=strtobool, nargs='?', help='The flag to switch to use context vector residual in the decoder network'),

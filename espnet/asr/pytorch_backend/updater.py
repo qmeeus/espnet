@@ -25,8 +25,8 @@ class CustomUpdater(StandardUpdater):
 
     """
 
-    def __init__(self, model, grad_clip_threshold, train_iter,
-                 optimizer, device, ngpu, grad_noise=False, accum_grad=1, use_apex=False):
+    def __init__(self, model, grad_clip_threshold, train_iter, optimizer, device, ngpu, 
+                 grad_noise=False, accum_grad=1, use_apex=False, freeze_encoder=0):
         super(CustomUpdater, self).__init__(train_iter, optimizer)
         self.model = model
         self.grad_clip_threshold = grad_clip_threshold
@@ -37,6 +37,7 @@ class CustomUpdater(StandardUpdater):
         self.grad_noise = grad_noise
         self.iteration = 0
         self.use_apex = use_apex
+        self.freeze_encoder = freeze_encoder
 
     # The core part of the update routine can be customized by overriding.
     def update_core(self):
@@ -44,14 +45,21 @@ class CustomUpdater(StandardUpdater):
         # When we pass one iterator and optimizer to StandardUpdater.__init__,
         # they are automatically named 'main'.
         train_iter = self.get_iterator('main')
-        optimizer = self.get_optimizer('main')
         epoch = train_iter.epoch
+        batch = next(train_iter)
+        is_new_epoch = train_iter.epoch != epoch
+
+        if self.freeze_encoder > 0 and epoch < self.freeze_encoder:
+            logging.debug("Updating only the decoder's parameters")
+            optimizer = self.get_optimizer("decoder")
+        else:
+            if is_new_epoch and self.freeze_encoder > 0 and epoch == self.freeze_encoder:
+                logging.info("Start updating the encoder")
+            optimizer = self.get_optimizer('main')
 
         # Get the next batch (a list of json files)
-        batch = next(train_iter)
         # self.iteration += 1 # Increase may result in early report, which is done in other place automatically.
         x = _recursive_to(batch, self.device)
-        is_new_epoch = train_iter.epoch != epoch
         # When the last minibatch in the current epoch is given,
         # gradient accumulation is turned off in order to evaluate the model
         # on the validation set in every epoch.
@@ -63,14 +71,8 @@ class CustomUpdater(StandardUpdater):
         else:
             # apex does not support torch.nn.DataParallel
             loss = data_parallel(self.model, x, range(self.ngpu)).mean() / self.accum_grad
-        if self.use_apex:
-            from apex import amp
-            # NOTE: for a compatibility with noam optimizer
-            opt = optimizer.optimizer if hasattr(optimizer, "optimizer") else optimizer
-            with amp.scale_loss(loss, opt) as scaled_loss:
-                scaled_loss.backward()
-        else:
-            loss.backward()
+        
+        loss.backward()
         # gradient noise injection
         if self.grad_noise:
             from espnet.asr.asr_utils import add_gradient_noise

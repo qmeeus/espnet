@@ -81,20 +81,33 @@ def build_model(list_input_dim, output_dim, args):
     return model
 
 
-def get_optimizer(model, args):
+def get_optimizer(model, args, reporter):
     # Setup an optimizer
     if args.opt == 'adadelta':
+        
         optimizer = torch.optim.Adadelta(
             model.parameters(), rho=0.95, eps=args.eps,
-            weight_decay=args.weight_decay)
+            weight_decay=args.weight_decay
+        )
+
     elif args.opt == 'adam':
-        optimizer = torch.optim.Adam(model.parameters(),
-                                     weight_decay=args.weight_decay)
+        optimizer = torch.optim.Adam(
+            model.parameters(),
+            weight_decay=args.weight_decay
+        )
+
     elif args.opt == 'noam':
+
         from espnet.nets.pytorch_backend.transformer.optimizer import get_std_opt
         optimizer = get_std_opt(model, args.adim, args.transformer_warmup_steps, args.transformer_lr)
+
     else:
         raise NotImplementedError("unknown optimizer: " + args.opt)
+
+    # FIXME: TOO DIRTY HACK
+    setattr(optimizer, "target", reporter)
+    setattr(optimizer, "serialize", lambda s: reporter.serialize(s))
+
     return optimizer
 
 
@@ -178,27 +191,11 @@ def train(args):
         
     reporter = model.reporter
     model = model.to(device=device, dtype=dtype)
-    optimizer = get_optimizer(model, args)
+    optimizer = get_optimizer(model, args, reporter)
+    if args.freeze_encoder:
+        decoder_optimizer = get_optimizer(model.encoder, args, reporter)
 
-    # setup apex.amp
-    if args.train_dtype in ("O0", "O1", "O2", "O3"):
-        try:
-            from apex import amp
-        except ImportError as e:
-            logging.error(f"You need to install apex for --train-dtype {args.train_dtype}. "
-                          "See https://github.com/NVIDIA/apex#linux")
-            raise e
-        if args.opt == 'noam':
-            model, optimizer.optimizer = amp.initialize(model, optimizer.optimizer, opt_level=args.train_dtype)
-        else:
-            model, optimizer = amp.initialize(model, optimizer, opt_level=args.train_dtype)
-        args.use_apex = True
-    else:
-        args.use_apex = False
-
-    # FIXME: TOO DIRTY HACK
-    setattr(optimizer, "target", reporter)
-    setattr(optimizer, "serialize", lambda s: reporter.serialize(s))
+    args.use_apex = False
 
     # DATA ITERATORS
     # Setup a converter
@@ -255,6 +252,9 @@ def train(args):
 
     # TRAINER CONFIGURATION
     # Set up a trainer
+    if args.freeze_encoder:
+        optimizer = {"main": optimizer, "decoder": decoder_optimizer}
+
     trainer = CustomTrainer(
         args, model, optimizer, train_iter, valid_iter, converter, device, valid_json, load_cv
     )
