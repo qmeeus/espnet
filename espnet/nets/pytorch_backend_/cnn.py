@@ -5,6 +5,37 @@ from torch import nn
 from torch.nn import functional as F
 
 
+class VGGLayer(nn.Module):
+
+    def __init__(self, in_channels, out_channels, kernel_size, stride, padding, pool_size, pool_stride):
+
+        super(VGGLayer, self).__init__()
+
+        self.conv1, self.conv2 = (
+            nn.Conv2d(
+                in_channels=in_channels if i == 0 else out_channels,
+                out_channels=out_channels,
+                kernel_size=kernel_size,
+                stride=stride,
+                padding=padding
+            ) for i in range(2)
+        )
+
+        self.pool = nn.MaxPool2d(
+            kernel_size=pool_size, 
+            stride=pool_stride, 
+            ceil_mode=True
+        )
+
+    def forward(self, X):
+        X = F.relu(self.conv1(X))
+        X = F.relu(self.conv2(X))
+        return self.pool(X)
+
+    def output_length(self, input_length):
+        raise NotImplementedError
+
+
 class VGG2L(nn.Module):
 
     # TODO: test
@@ -19,8 +50,8 @@ class VGG2L(nn.Module):
         strides = options.get("strides", [1, 1])
         paddings = options.get("paddings", [1, 1])
 
-        self.layers = nn.ModuleList([
-            self.conv_layer(
+        self.layers = nn.Sequential(*[
+            VGGLayer(
                 in_channels=in_channels if i == 0 else filters[i-1],
                 out_channels=filters[i],
                 kernel_size=kernel_sizes[i],
@@ -57,42 +88,9 @@ class VGG2L(nn.Module):
         ilens = compute_lengths(compute_lengths(ilens))
 
         # x: utt_list of frame (remove zeropaded frames) x (input channel num x dim)
-        xs_pad = xs_pad.transpose(1, 2).contiguous().view(*xs_pad.size()[:2], -1)
+        xs_pad = xs_pad.transpose(1, 2).contiguous()
+        xs_pad = xs_pad.view(*xs_pad.size()[:2], -1)
         return xs_pad, ilens  # no state in this layer
-
-    def conv_layer(self, in_channels, 
-                   out_channels, 
-                   kernel_size, 
-                   stride=1,
-                   padding=1,
-                   pool_size=2, 
-                   pool_stride=2):
-
-        layer = nn.ModuleList()
-        
-        for _ in range(2):
-            layer.append(
-                nn.Conv2d(
-                    in_channels=in_channels,
-                    out_channels=out_channels,
-                    kernel_size=kernel_size,
-                    stride=stride,
-                    padding=padding,
-                )
-            )
-
-            layer.append(nn.ReLU())
-            in_channels = out_channels
-
-        layer.append(
-            nn.MaxPool2d(
-                kernel_size=pool_size, 
-                stride=pool_stride, 
-                ceil_mode=True
-            )
-        )
-
-        return layer
 
     @staticmethod
     def get_output_dim(idim, in_channel=3, out_channel=128):

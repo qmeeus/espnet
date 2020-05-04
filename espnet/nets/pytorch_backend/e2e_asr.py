@@ -155,9 +155,15 @@ class E2E(ASRInterface, torch.nn.Module):
 
         # Remove unused metrics
         if self.mtlalpha == 1:
-            self.LOSS_NAMES.remove("loss_att"); self.METRIC_NAMES.remove("accuracy")
+            if "loss_att" in self.LOSS_NAMES: 
+                self.LOSS_NAMES.remove("loss_att")
+            if "accuracy" in self.METRIC_NAMES: 
+                self.METRIC_NAMES.remove("accuracy")
         if self.mtlalpha == 0:
-            self.LOSS_NAMES.remove("loss_ctc"); self.METRIC_NAMES.remove("cer_ctc")
+            if "loss_ctc" in self.LOSS_NAMES: 
+                self.LOSS_NAMES.remove("loss_ctc")
+            if "cer_ctc" in self.METRIC_NAMES: 
+                self.METRIC_NAMES.remove("cer_ctc")
 
         self.etype = args.etype
         self.verbose = args.verbose

@@ -61,7 +61,7 @@ class RNNEncoder(nn.Module):
         outputs, _ = pad_packed_sequence(packed_outputs)
         # outputs [ seq len, batch size, num directions * hidden size ]
         # hidden [ num layers * num directions, batch size, hidden size ]
-        
+
         if hasattr(self, 'output_layer'):
             outputs = self.output_layer(outputs)
 
@@ -70,7 +70,7 @@ class RNNEncoder(nn.Module):
                 outputs.view(seqlen, batch_size, 2, -1),
                 dim=2
             )
-    
+
             # outputs [ seq len, batch size, hidden size ]
 
         outputs = torch.tanh(outputs)
@@ -115,7 +115,7 @@ class PyramidalRNNLayer(nn.Module):
 
     def forward(self, inputs, input_lengths, prev_state=None):
         batch_size = inputs.size(0)
-            
+
         packed_inputs = pack_padded_sequence(inputs, input_lengths, batch_first=True)
         self.rnn.flatten_parameters()
 
@@ -125,13 +125,8 @@ class PyramidalRNNLayer(nn.Module):
         packed_outputs, states = self.rnn(packed_inputs, hx=prev_state)
         outputs, output_lengths = pad_packed_sequence(packed_outputs, batch_first=True)
         output_lengths = output_lengths.type_as(input_lengths)
-        
-        if self.subsampling > 1:
-            outputs = outputs[:, ::self.subsampling]
-            output_lengths = (
-                ((output_lengths.float() + 1) / self.subsampling)
-                .floor().type_as(input_lengths)
-            )
+
+        outputs, output_lengths = self.subsample(outputs, output_lengths)
 
         timesteps = outputs.size(1)
         outputs = self.fc(outputs.contiguous().view(-1, outputs.size(2)))
@@ -144,6 +139,18 @@ class PyramidalRNNLayer(nn.Module):
 
         outputs = outputs.view(batch_size, timesteps, self.output_dim)
         return outputs, output_lengths, states
+
+    def subsample(self, inputs, input_lengths):
+        if self.subsampling < 2:
+            return inputs, input_lengths
+
+        outputs = inputs[:, ::self.subsampling]
+        output_lengths = (
+            ((input_lengths.float() + 1) / self.subsampling)
+            .floor().type_as(input_lengths)
+        )
+
+        return outputs, output_lengths
 
 
 class PyramidalRNN(nn.Module):
@@ -202,8 +209,9 @@ class PyramidalRNN(nn.Module):
             inputs = inputs[:, ::self.subsampling[0], :]
             input_lengths = (input_lengths.float() / self.subsampling[0]).ceil().type_as(input_lengths)
 
+        outputs, output_lengths = inputs, input_lengths
         for layer in self.layers:
-            inputs, input_lengths, states = layer(inputs, input_lengths)
+            outputs, output_lengths, states = layer(inputs, input_lengths)
 
         # initial decoder hidden is final hidden state of the forwards and backwards 
         # encoder RNNs fed through a linear layer
@@ -211,7 +219,7 @@ class PyramidalRNN(nn.Module):
             states = states[0]
 
         states = torch.tanh(states.view(batch_size, 2, self.hidden_units).mean(1))
-        return inputs, input_lengths, states
+        return outputs, output_lengths, states
 
 
 class Encoder(nn.Module):
@@ -239,7 +247,7 @@ class Encoder(nn.Module):
             pass
         elif frontend.lower() == "vgg":
             self.frontend = VGG2L(in_channel)
-            input_dim = VGG2L.get_output_dim(input_dim)
+            input_dim = VGG2L.get_output_dim(input_dim, in_channel=in_channel)
         else:
             raise NotImplementedError(f"{frontend}")
 
@@ -270,7 +278,6 @@ class Encoder(nn.Module):
         :return: batch of hidden state sequences (B, Tmax, eprojs)
         :rtype: torch.Tensor
         """
-
         if hasattr(self, 'frontend'):
             inputs, input_lengths = self.frontend(inputs, input_lengths)
 
