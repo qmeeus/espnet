@@ -211,7 +211,7 @@ class PyramidalRNN(nn.Module):
 
         outputs, output_lengths = inputs, input_lengths
         for layer in self.layers:
-            outputs, output_lengths, states = layer(inputs, input_lengths)
+            outputs, output_lengths, states = layer(outputs, output_lengths)
 
         # initial decoder hidden is final hidden state of the forwards and backwards 
         # encoder RNNs fed through a linear layer
