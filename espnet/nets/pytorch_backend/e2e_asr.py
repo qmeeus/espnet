@@ -62,7 +62,7 @@ class E2E(ASRInterface, torch.nn.Module):
     """
 
     LOSS_NAMES = ["loss", "loss_ctc", "loss_att"]
-    METRIC_NAMES = ["accuracy", "cer_ctc"]
+    METRIC_NAMES = ["accuracy", "cer_ctc", "ter_ctc"]
 
     @staticmethod
     def add_arguments(parser):
@@ -159,11 +159,12 @@ class E2E(ASRInterface, torch.nn.Module):
                 self.LOSS_NAMES.remove("loss_att")
             if "accuracy" in self.METRIC_NAMES: 
                 self.METRIC_NAMES.remove("accuracy")
-        if self.mtlalpha == 0:
+        elif self.mtlalpha == 0:
             if "loss_ctc" in self.LOSS_NAMES: 
                 self.LOSS_NAMES.remove("loss_ctc")
             if "cer_ctc" in self.METRIC_NAMES: 
                 self.METRIC_NAMES.remove("cer_ctc")
+                self.METRIC_NAMES.remove("ter_ctc")
 
         self.etype = args.etype
         self.verbose = args.verbose
@@ -297,11 +298,12 @@ class E2E(ASRInterface, torch.nn.Module):
     def compute_metrics(self, hs_pad, hlens, ys_pad):
         # 1. compute cer without beam search
         cer_ctc = self.compute_cer_ctc(hs_pad, ys_pad)
+        ter_ctc = self.compute_ter_ctc(hs_pad, ys_pad)
 
         # 2. compute cer/wer
         wer, cer = self.compute_wer_cer(hs_pad, hlens, ys_pad)
 
-        return {"cer_ctc": cer_ctc, "wer": wer, "cer": cer}
+        return {"cer_ctc": cer_ctc, "ter_ctc": ter_ctc, "wer": wer, "cer": cer}
 
 
     def compute_loss(self, hs_pad, hlens, ys_pad):
@@ -352,6 +354,23 @@ class E2E(ASRInterface, torch.nn.Module):
                 cers.append(editdistance.eval(hyp_chars, ref_chars) / len(ref_chars))
 
             return sum(cers) / len(cers) if cers else None
+
+    def compute_ter_ctc(self, hs_pad, ys_pad):
+        if self.mtlalpha == 0 or self.char_list is None:
+            return
+
+        ters = []
+        blank_index = self.char_list.index(self.blank)
+        y_hats = self.ctc.argmax(hs_pad).data
+        for i, y in enumerate(y_hats):
+            y_hat = [x[0] for x in groupby(y)]
+            y_true = ys_pad[i]
+
+            y_hat = list(filter(lambda x: x != blank_index, y_hat))
+            if len(y_true):
+                ters.append(editdistance.eval(y_hat, y_true) / len(y_true))
+
+            return sum(ters) / len(ters) if ters else None
 
     def compute_wer_cer(self, hs_pad, hlens, ys_pad):
 
