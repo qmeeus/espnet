@@ -178,7 +178,6 @@ def train(args):
     if DEBUG_MODEL:
         from pytorch_lightning import Trainer
         from espnet.asr.pytorch_backend.model import ASRModel
-        import ipdb; ipdb.set_trace()
 
         model_class = dynamic_import(args.model_class)
         model = ASRModel(model_class, args)

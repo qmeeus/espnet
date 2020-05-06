@@ -108,7 +108,7 @@ CONFIG = {
     "batch-frames-in": dict(default=0, type=int, help='Maximum input frames in a minibatch (0 to disable)'),
     "batch-frames-out": dict(default=0, type=int, help='Maximum output frames in a minibatch (0 to disable)'),
     "batch-frames-inout": dict(
-        default=0, type=int, help='Maximum input+output frames iGENERAL_CONFIGn a minibatch (0 to disable)'),
+        default=0, type=int, help='Maximum input+output frames in a minibatch (0 to disable)'),
     "maxlen-in": dict(
         default=800, type=int, metavar='ML',
         help='When --batch-count=seq, batch size is reduced if the input sequence length > ML.'),
@@ -137,13 +137,14 @@ CONFIG = {
 
     # Pretrained models
     "enc-init": dict(default=None, type=str, help='Pre-trained ASR model to initialize encoder.'),
-    "enc-init-mods": dict(default='encoder.enc.', type=split_string(','), help='List of encoder modules to initialize, separated by a comma.'),
+    "enc-init-mods": dict(default='encoder.', type=split_string(','), help='List of encoder modules to initialize, separated by a comma.'),
     "dec-init": dict(default=None, type=str, help='Pre-trained ASR, MT or LM model to initialize decoder.'),
-    "dec-init-mods": dict(default='attention.,decoder.', type=split_string(','), help='List of decoder modules to initialize, separated by a comma.'),
+    "dec-init-mods": dict(default='decoder.', type=split_string(','), help='List of decoder modules to initialize, separated by a comma.'),
 
     # Encoder
     "use-frontend": dict(type=strtobool, default=False, help='The flag to switch to use frontend system.'),
     "num-encs": dict(default=1, type=int, help='Number of encoders in the model.'),
+    "freeze-encoder": dict(type=int, default=0, help="Number of epoch for which the encoder is not updated"),
 
     # Decoder
     "context-residual": dict(default=False, type=strtobool, nargs='?', help='The flag to switch to use context vector residual in the decoder network'),

@@ -29,7 +29,7 @@ from espnet.nets.pytorch_backend.nets_utils import pad_list
 from espnet.nets.pytorch_backend.nets_utils import to_device
 from espnet.nets.pytorch_backend.nets_utils import to_torch_tensor
 from espnet.nets.pytorch_backend.rnn.attentions import att_for
-from espnet.nets.pytorch_backend.rnn.encoders import encoder_for
+from espnet.nets.pytorch_backend_.rnn.encoders import encoder_for
 
 from espnet.nets.pytorch_backend.rnn.decoders_ import decoder_for
 
@@ -70,10 +70,10 @@ class E2E(torch.nn.Module):
         """Add arguments for the encoder."""
         group = parser.add_argument_group("E2E encoder setting")
         # encoder
-        group.add_argument('--etype', default='blstmp', type=str,
-                           choices=['lstm', 'blstm', 'lstmp', 'blstmp', 'vgglstmp', 'vggblstmp', 'vgglstm', 'vggblstm',
-                                    'gru', 'bgru', 'grup', 'bgrup', 'vgggrup', 'vggbgrup', 'vgggru', 'vggbgru'],
-                           help='Type of encoder network architecture')
+        group.add_argument('--etype', default='blstmp', type=str, choices=[
+            'lstm', 'blstm', 'lstmp', 'blstmp', 'vgglstmp', 'vggblstmp', 'vgglstm', 'vggblstm',
+            'gru', 'bgru', 'grup', 'bgrup', 'vgggrup', 'vggbgrup', 'vgggru', 'vggbgru'
+        ], help='Type of encoder network architecture')
         group.add_argument('--elayers', default=4, type=int,
                            help='Number of encoder layers (for shared recognition part in multi-speaker asr mode)')
         group.add_argument('--eunits', '-u', default=300, type=int,
@@ -144,8 +144,7 @@ class E2E(torch.nn.Module):
         self.etype = args.etype
         self.verbose = args.verbose
         # NOTE: for self.build method
-        args.char_list = getattr(args, "char_list", None)
-        self.char_list = args.char_list
+        self.char_list = args.char_list = getattr(args, "char_list", None)
         self.outdir = args.outdir
         self.reporter = Reporter()
 
