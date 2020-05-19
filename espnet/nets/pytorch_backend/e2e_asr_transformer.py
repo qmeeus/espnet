@@ -39,6 +39,9 @@ class E2E(ASRInterface, torch.nn.Module):
 
     """
 
+    LOSS_NAMES = ["loss", "loss_att", "loss_ctc"]
+    METRIC_NAMES = ["cer_ctc", "accuracy"]
+
     @staticmethod
     def add_arguments(parser):
         """Add arguments."""
@@ -59,9 +62,8 @@ class E2E(ASRInterface, torch.nn.Module):
                            help='optimizer warmup steps')
         group.add_argument('--transformer-length-normalized-loss', default=True, type=strtobool,
                            help='normalize loss by length')
+        group.add_argument('--dropout-rate', default=0.0, type=float, help='Dropout rate')
 
-        group.add_argument('--encoder-dropout', default=0.0, type=float,
-                           help='Dropout rate for the encoder')
         # Encoder
         group.add_argument('--elayers', default=4, type=int,
                            help='Number of encoder layers (for shared recognition part in multi-speaker asr mode)')
@@ -100,8 +102,8 @@ class E2E(ASRInterface, torch.nn.Module):
             linear_units=args.eunits,
             num_blocks=args.elayers,
             input_layer=args.transformer_input_layer,
-            dropout_rate=args.encoder_dropout,
-            positional_dropout_rate=args.encoder_dropout,
+            dropout_rate=args.dropout_rate,
+            positional_dropout_rate=args.dropout_rate,
             attention_dropout_rate=args.transformer_attn_dropout_rate
         )
         self.decoder = Decoder(
@@ -110,8 +112,8 @@ class E2E(ASRInterface, torch.nn.Module):
             attention_heads=args.aheads,
             linear_units=args.dunits,
             num_blocks=args.dlayers,
-            dropout_rate=args.decoder_dropout,
-            positional_dropout_rate=args.decoder_dropout,
+            dropout_rate=args.dropout_rate,
+            positional_dropout_rate=args.dropout_rate,
             self_attention_dropout_rate=args.transformer_attn_dropout_rate,
             src_attention_dropout_rate=args.transformer_attn_dropout_rate
         )
@@ -130,7 +132,7 @@ class E2E(ASRInterface, torch.nn.Module):
         self.adim = args.adim
         self.mtlalpha = args.mtlalpha
         if args.mtlalpha > 0.0:
-            self.ctc = CTC(odim, args.adim, args.encoder_dropout, ctc_type=args.ctc_type, reduce=True)
+            self.ctc = CTC(odim, args.adim, args.dropout_rate, ctc_type=args.ctc_type, reduce=True)
         else:
             self.ctc = None
 
@@ -215,7 +217,14 @@ class E2E(ASRInterface, torch.nn.Module):
 
         loss_data = float(self.loss)
         if loss_data < CTC_LOSS_THRESHOLD and not math.isnan(loss_data):
-            self.reporter.report(loss_ctc_data, loss_att_data, self.acc, cer_ctc, cer, wer, loss_data)
+            self.reporter.report(
+                loss_ctc=loss_ctc_data, 
+                loss_att=loss_att_data, 
+                accuracy=self.acc, 
+                cer_ctc=cer_ctc, 
+                cer=cer, 
+                wer=wer, 
+                loss=loss_data)
         else:
             logging.warning('loss (=%f) is not correct', loss_data)
         return self.loss
