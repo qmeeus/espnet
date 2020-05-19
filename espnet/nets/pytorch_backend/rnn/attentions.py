@@ -311,7 +311,7 @@ class AttLoc(torch.nn.Module):
         if att_prev is None:
             # if no bias, 0 0-pad goes 0
             att_prev = (1. - make_pad_mask(enc_hs_len).to(device=dec_z.device, dtype=dec_z.dtype))
-            att_prev = att_prev / att_prev.new(enc_hs_len).unsqueeze(-1)
+            att_prev = att_prev / att_prev.new_tensor(enc_hs_len).unsqueeze(-1)
 
         # att_prev: utt x frame -> utt x 1 x 1 x frame -> utt x att_conv_chans x 1 x frame
         att_conv = self.loc_conv(att_prev.view(batch, 1, 1, self.h_length))

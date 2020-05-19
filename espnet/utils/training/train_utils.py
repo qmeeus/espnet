@@ -1,5 +1,5 @@
-import chainer
 import logging
+from chainer.training.triggers import EarlyStoppingTrigger
 
 
 def check_early_stop(trainer, epochs):
@@ -26,7 +26,9 @@ def set_early_stop(trainer, args, is_lm=False):
     epochs = args.epoch if is_lm else args.epochs
     mode = 'max' if 'acc' in criterion else 'min'
     if patience > 0:
-        trainer.stop_trigger = chainer.training.triggers.EarlyStoppingTrigger(monitor=criterion,
-                                                                              mode=mode,
-                                                                              patients=patience,
-                                                                              max_trigger=(epochs, 'epoch'))
+        trainer.stop_trigger = EarlyStoppingTrigger(
+            monitor=criterion,
+            mode=mode,
+            patients=patience,
+            max_trigger=(epochs, 'epoch')
+        )

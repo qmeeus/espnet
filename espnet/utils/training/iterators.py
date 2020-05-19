@@ -1,10 +1,11 @@
+import numpy as np
 import chainer
 from chainer.iterators import MultiprocessIterator
 from chainer.iterators import SerialIterator
 from chainer.iterators import ShuffleOrderSampler
 from chainer.training.extension import Extension
 
-import numpy as np
+# from espnet.utils.dataset import ChainerDataLoader
 
 
 class ShufflingEnabler(Extension):

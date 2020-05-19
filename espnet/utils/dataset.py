@@ -33,7 +33,7 @@ class TransformDataset(torch.utils.data.Dataset):
         return self.transform(self.data[idx])
 
 
-class ChainerDataLoader(object):
+class ChainerDataLoader:
     """Pytorch dataloader in chainer style.
 
     Args:

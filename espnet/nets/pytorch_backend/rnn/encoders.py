@@ -198,7 +198,9 @@ class VGG2L(torch.nn.Module):
         # x: utt_list of frame (remove zeropaded frames) x (input channel num x dim)
         xs_pad = xs_pad.transpose(1, 2)
         xs_pad = xs_pad.contiguous().view(
-            xs_pad.size(0), xs_pad.size(1), xs_pad.size(2) * xs_pad.size(3))
+            xs_pad.size(0), xs_pad.size(1), xs_pad.size(2) * xs_pad.size(3)
+        )
+
         return xs_pad, ilens, None  # no state in this layer
 
 
@@ -265,7 +267,7 @@ class Encoder(torch.nn.Module):
         # make mask to remove bias value in padded part
         mask = to_device(self, make_pad_mask(ilens).unsqueeze(-1))
 
-        return xs_pad.masked_fill(mask, 0.0), ilens, current_states
+        return xs_pad.masked_fill_(mask, 0.0), ilens, current_states
 
 
 def encoder_for(args, idim, subsample):

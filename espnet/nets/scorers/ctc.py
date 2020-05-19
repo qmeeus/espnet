@@ -10,7 +10,7 @@ from espnet.nets.scorer_interface import PartialScorerInterface
 class CTCPrefixScorer(PartialScorerInterface):
     """Decoder interface wrapper for CTCPrefixScore."""
 
-    def __init__(self, ctc: torch.nn.Module, eos: int):
+    def __init__(self, ctc:torch.nn.Module, eos:int):
         """Initialize class.
 
         Args:
