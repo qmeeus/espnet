@@ -50,15 +50,18 @@ class CompareValueTrigger(object):
 
     def __call__(self, trainer):
         """Get value related to the key and compare with current value."""
-        observation = trainer.observation
-        summary = self._summary
-        key = self._key
-        if key in observation:
-            summary.add({key: observation[key]})
-
+            
         if not self._interval_trigger(trainer):
             return False
 
+        observation = trainer.observation
+        summary = self._summary
+        key = self._key
+
+        if key not in observation:
+            return False
+
+        summary.add({key: observation[key]})
         stats = summary.compute_mean()
         value = float(stats[key])  # copy to CPU
         self._init_summary()
@@ -435,6 +438,7 @@ def get_model_conf(model_path, conf_path=None):
         model_conf = os.path.dirname(model_path) + '/model.json'
     else:
         model_conf = conf_path
+
     with open(model_conf, "rb") as f:
         logging.info('reading a config file from ' + model_conf)
         confs = json.load(f)
