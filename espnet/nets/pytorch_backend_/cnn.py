@@ -22,8 +22,8 @@ class VGGLayer(nn.Module):
         )
 
         self.pool = nn.MaxPool2d(
-            kernel_size=pool_size, 
-            stride=pool_stride, 
+            kernel_size=pool_size,
+            stride=pool_stride,
             ceil_mode=True
         )
 
@@ -81,10 +81,10 @@ class VGG2L(nn.Module):
         # x: utt x 1 (input channel num) x frame x dim
         xs_pad = xs_pad.view(*xs_pad.size()[:2], self.in_channels, -1).transpose(1, 2)
         xs_pad = self.layers(xs_pad)
-        
+
         def compute_lengths(lengths, subsampling=2):
             return (lengths.float() / 2).ceil().type_as(lengths)
-                
+
         ilens = compute_lengths(compute_lengths(ilens))
 
         # x: utt_list of frame (remove zeropaded frames) x (input channel num x dim)
@@ -93,7 +93,7 @@ class VGG2L(nn.Module):
         return xs_pad, ilens  # no state in this layer
 
     @staticmethod
-    def get_output_dim(idim, in_channel=3, out_channel=128):
+    def get_output_dim(idim, in_channel=1, out_channel=128):
         """Return the output size of the VGG frontend.
         :param in_channel: input channel size
         :param out_channel: output channel size
@@ -104,3 +104,41 @@ class VGG2L(nn.Module):
         idim = np.ceil(np.array(idim, dtype=np.float32) / 2)  # 1st max pooling
         idim = np.ceil(np.array(idim, dtype=np.float32) / 2)  # 2nd max pooling
         return int(idim) * out_channel  # number of channels
+
+
+class DilatedCNN(nn.Module):
+
+    @classmethod
+    def default_arch(cls, input_dim):
+        return cls(input_dim, [64, 128], [3, 3], [1, 1], [1, 1], [2, 2])
+
+    def __init__(self, input_dim, filters, kernel_sizes, strides, paddings, dilations):
+        super(DilatedCNN, self).__init__()
+
+        self.layers = nn.Sequential(*[
+            VGGLayer(
+                in_channels=in_channels if i == 0 else filters[i-1],
+                out_channels=filters[i],
+                kernel_size=kernel_sizes[i],
+                stride=strides[i],
+                padding=paddings[i],
+                pool_size=2,
+                pool_stride=2
+            ) for i in range(len(filters))
+        ])
+
+        self.in_channels = in_channels
+
+    def forward(self, xs_pad, ilens):
+        xs_pad = xs_pad.view(*xs_pad.size()[:2], self.in_channels, -1).transpose(1, 2)
+        xs_pad = self.layers(xs_pad)
+
+        def compute_lengths(lengths, subsampling=2):
+            return (lengths.float() / 2).ceil().type_as(lengths)
+
+        ilens = compute_lengths(compute_lengths(ilens))
+
+        # x: utt_list of frame (remove zeropaded frames) x (input channel num x dim)
+        xs_pad = xs_pad.transpose(1, 2).contiguous()
+        xs_pad = xs_pad.view(*xs_pad.size()[:2], -1)
+        return xs_pad, ilens  # no state in this layer
