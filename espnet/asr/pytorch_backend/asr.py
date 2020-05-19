@@ -49,6 +49,11 @@ else:
 
 DEBUG_MODEL = False
 
+
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
 def build_model(list_input_dim, output_dim, args):
 
     if (args.enc_init is not None or args.dec_init is not None) and args.num_encs == 1:
@@ -77,6 +82,8 @@ def build_model(list_input_dim, output_dim, args):
 
     for line in str(model).split("\n"):
         logging.info(line)
+
+    logging.info(f"# Params: {count_parameters(model):,}")
 
     return model
 
@@ -240,7 +247,7 @@ def train(args):
     train_iter, valid_iter = (
         {
             'main': ChainerDataLoader(
-                dataset = TransformDataset(subset, lambda data: converter([loader(data)])),
+                dataset=TransformDataset(subset, lambda data: converter([loader(data)])),
                 batch_size=1,
                 shuffle=not(args.use_sortagrad) if i == 0 else False,
                 num_workers=args.n_iter_processes,
@@ -301,7 +308,7 @@ def recog(args):
                 batch = [(name, js[name])]
                 feat = load_inputs_and_targets(batch)
                 feat = feat[0][0] if args.num_encs == 1 else [feat[idx][0] for idx in range(model.num_encs)]
-                nbest_hyps = model.recognize(feat, args, train_args.char_list, rnnlm)
+                nbest_hyps = model.recognize(torch.as_tensor(feat), args, train_args.char_list, rnnlm)
                 new_js[name] = add_results_to_json(js[name], nbest_hyps, train_args.char_list)
 
     else:
@@ -320,8 +327,8 @@ def recog(args):
             for names in grouper(args.batchsize, keys, None):
                 names = [name for name in names if name]
                 batch = [(name, js[name]) for name in names]
-                feats = load_inputs_and_targets(batch)[0] if args.num_encs == 1 else load_inputs_and_targets(batch)
-                nbest_hyps = model.recognize_batch(feats, args, train_args.char_list, rnnlm=rnnlm)
+                feat = load_inputs_and_targets(batch)[0] if args.num_encs == 1 else load_inputs_and_targets(batch)
+                nbest_hyps = model.recognize_batch(torch.as_tensor(feat), args, train_args.char_list, rnnlm=rnnlm)
 
                 for i, nbest_hyp in enumerate(nbest_hyps):
                     name = names[i]
