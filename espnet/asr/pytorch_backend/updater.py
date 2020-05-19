@@ -3,7 +3,7 @@ import math
 import torch
 from torch.nn.parallel import data_parallel
 from chainer.training.updater import StandardUpdater
-
+from chainer.reporter import report
 from espnet.utils.torch_utils import _recursive_to
 
 
@@ -87,6 +87,7 @@ class CustomUpdater(StandardUpdater):
         grad_norm = torch.nn.utils.clip_grad_norm_(
             self.model.parameters(), self.grad_clip_threshold)
         logging.debug('grad norm={}'.format(grad_norm))
+        report({"grad_norm": grad_norm})
         if math.isnan(grad_norm):
             logging.warning('grad norm is nan. Do not update model.')
         else:

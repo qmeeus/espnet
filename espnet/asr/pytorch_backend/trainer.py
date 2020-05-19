@@ -23,14 +23,15 @@ from espnet.utils.training.tensorboard_logger import TensorboardLogger
 
 class CustomTrainer:
 
-    def __init__(self, args, model, optimizer, training_set, validation_set, 
+
+    def __init__(self, args, model, optimizer, training_set, validation_set,
                  converter, device, valid_json=None, load_cv=None):
 
         self.epochs = args.epochs
         self.outdir = args.outdir
         self.resume = args.resume
         self.device = device
-        
+
         self.model = model
         self.optimizer = optimizer
         self.training_set = training_set
@@ -40,7 +41,7 @@ class CustomTrainer:
 
         self.updater = CustomUpdater(
             model, args.grad_clip, training_set, self.optimizer,
-            device, args.ngpu, args.grad_noise, args.accum_grad, 
+            device, args.ngpu, args.grad_noise, args.accum_grad,
             use_apex=args.use_apex
         )
 
@@ -61,7 +62,6 @@ class CustomTrainer:
 
         set_early_stop(self.trainer, args)
 
-
     def add_extension(self, extension, trigger=None):
         self.trainer.extend(extension, trigger=trigger)
 
@@ -77,8 +77,8 @@ class CustomTrainer:
             )
 
         self.add_extension(self.evaluator, trigger=(
-            (args.save_interval_iters, 'iteration') 
-            if args.save_interval_iters > 0 
+            (args.save_interval_iters, 'iteration')
+            if args.save_interval_iters > 0
             else None
         ))
 
@@ -89,23 +89,23 @@ class CustomTrainer:
 
             data = sorted(
                 list(valid_json.items())[:args.num_save_attention],
-                key=lambda x: int(x[1]['input'][0]['shape'][1]), 
+                key=lambda x: int(x[1]['input'][0]['shape'][1]),
                 reverse=True
             )
 
             if hasattr(self.model, "module"):
                 att_vis_fn = self.model.module.calculate_all_attentions
                 plot_class = self.model.module.attention_plot_class
-            
+
             else:
                 att_vis_fn = self.model.calculate_all_attentions
                 plot_class = self.model.attention_plot_class
-            
+
             att_reporter = plot_class(
                 att_vis_fn, data, args.outdir + "/att_ws",
                 converter=self.converter, transform=load_cv, device=self.device
             )
-            
+
             self.add_extension(att_reporter, trigger=(1, 'epoch'))
 
         else:
@@ -116,7 +116,7 @@ class CustomTrainer:
         prefixes = ['main', 'validation/main']
 
         losses, metrics = [
-            list(map("/".join, product(prefixes, names))) 
+            list(map("/".join, product(prefixes, names)))
             for names in (self.model.LOSS_NAMES, self.model.METRIC_NAMES)
         ]
 
@@ -132,17 +132,17 @@ class CustomTrainer:
 
         loss_plot_keys = losses
         # loss_plot_keys = [
-        #     'main/loss', 'validation/main/loss', 'main/loss_ctc', 'validation/main/loss_ctc', 
+        #     'main/loss', 'validation/main/loss', 'main/loss_ctc', 'validation/main/loss_ctc',
         #     'main/loss_att', 'validation/main/loss_att'
         # ]
-    
+
         acc_plot_keys, cer_plot_keys = (
             [metric for metric in metrics if mname in metric]
             for mname in ("accuracy", "cer_ctc")
         )
 
         # acc_plot_keys, cer_plot_keys = (
-        #     [f'main/{metric}', f'validation/main/{metric}'] 
+        #     [f'main/{metric}', f'validation/main/{metric}']
         #     for metric in ('accuracy', 'cer_ctc')
         # )
 
@@ -170,7 +170,15 @@ class CustomTrainer:
                 self.add_extension(
                     extensions.PlotReport(keys, 'epoch', file_name=f'{metric}.png')
                 )
-    
+
+        self.add_extension(
+            extensions.PlotReport(
+                ['grad_norm'],
+                trigger=(args.report_interval_iters, 'iteration'),
+                file_name=f'grad_norm.png'
+            )
+        )
+
         # Write a log of evaluation statistics for each epoch
         self.add_extension(
             extensions.LogReport(trigger=(args.report_interval_iters, 'iteration'))
@@ -178,21 +186,21 @@ class CustomTrainer:
 
         # Model checkpoints
         self.add_extension(
-            snapshot_object(self.model, 'model.loss.best'), 
+            snapshot_object(self.model, 'model.loss.best'),
             trigger=triggers.MinValueTrigger('validation/main/loss')
         )
 
 
         if args.mtl_mode != 'ctc' and acc_plot_keys:
             self.add_extension(
-                snapshot_object(self.model, 'model.acc.best'), 
+                snapshot_object(self.model, 'model.acc.best'),
                 trigger=triggers.MaxValueTrigger('validation/main/accuracy')
             )
 
         # save snapshot which contains model and optimizer states
         if args.save_interval_iters > 0:
             self.add_extension(
-                torch_snapshot(filename='snapshot.iter.{.updater.iteration}'), 
+                torch_snapshot(filename='snapshot.iter.{.updater.iteration}'),
                 trigger=(args.save_interval_iters, 'iteration')
             )
         else:
@@ -211,20 +219,20 @@ class CustomTrainer:
                 snapshot_name = 'model.loss.best'
 
             self.add_extension(
-                restore_snapshot(self.model, f"{args.outdir}/{snapshot_name}", load_fn=torch_load), 
+                restore_snapshot(self.model, f"{args.outdir}/{snapshot_name}", load_fn=torch_load),
                 trigger=trigger_best
             )
 
             self.add_extension(
-                adadelta_eps_decay(args.eps_decay), 
+                adadelta_eps_decay(args.eps_decay),
                 trigger=trigger_best
             )
-        
-            def get_obs_value(trainer): 
+
+            def get_obs_value(trainer):
                 return trainer.updater.get_optimizer('main').param_groups[0]["eps"]
 
             self.add_extension(
-                extensions.observe_value('eps', get_obs_value), 
+                extensions.observe_value('eps', get_obs_value),
                 trigger=(args.report_interval_iters, 'iteration')
             )
 
@@ -238,17 +246,17 @@ class CustomTrainer:
             report_keys.append('validation/main/wer')
 
         self.add_extension(
-            extensions.PrintReport(report_keys), 
+            extensions.PrintReport(report_keys),
             trigger=(args.report_interval_iters, 'iteration')
         )
 
         self.add_extension(
-            extensions.ProgressBar(update_interval=args.report_interval_iters), 
+            extensions.ProgressBar(update_interval=args.report_interval_iters),
             trigger=(args.report_interval_iters, 'iteration')
         )
 
         if args.tensorboard_dir:
             self.add_extension(
-                TensorboardLogger(SummaryWriter(args.tensorboard_dir), att_reporter), 
+                TensorboardLogger(SummaryWriter(args.tensorboard_dir), att_reporter),
                 trigger=(args.report_interval_iters, "iteration")
             )
