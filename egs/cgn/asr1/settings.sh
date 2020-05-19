@@ -31,15 +31,16 @@ exp_config=
 
 # decoding parameter
 recog_model=model.loss.best # set a model to be used for decoding: 'model.acc.best' or 'model.loss.best'
-recog_set=
+recog_set="a b f g h i j k l m n o"
 
 # exp tag
 tag=                  # tag for managing experiments.
 output_dir=
 tensorboard_dir=
 target="wordpiece"
-dataset_tag=""
-validset_tag=""
+dataset_tag=
+validset_tag=
+curriculum="o ok mono all"
 
 # data
 cgn_root=/users/spraak/spchdata/cgn

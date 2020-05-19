@@ -9,46 +9,41 @@
 set -u
 set -o pipefail
 
-validset_tag=${validset_tag:-$dataset_tag}
+setup_target(){
+  case $target in
+    "char")
+      dict=data/lang_1char/${train_set}_units.txt
+      json_prefix="data"
+      ;;
+    "wordpiece")
+      dict=data/lang_char/${train_set}_unigram_${vocab_size}_units.txt
+      json_prefix="data_unigram_${vocab_size}"
+      ;;
+    "word")
+      dict=data/lang_word/${train_set}_word_units.txt
+      json_prefix="data_words"
+      ;;
+    "pos")
+      dict=data/lang_word/${train_set}_pos_units.txt
+      json_prefix="data_pos_300"
+      ;;
+    *)
+      echo "Invalid target: $target" && exit 1
+      ;;
+  esac
 
-TGT_WORDS=
-case $target in
-  "char")
-    dict=data/lang_1char/${train_set}_units.txt
-    json_prefix="data"
-    ;;
-  "wordpiece")
-    dict=data/lang_char/${train_set}_unigram_${vocab_size}_units.txt
-    json_prefix="data_unigram_${vocab_size}"
-    ;;
-  "word")
-    dict=data/lang_word/${train_set}_word_units.txt
-    json_prefix="data_words"
-    export TGT_WORDS=1
-    ;;
-  "pos")
-    dict=data/lang_word/${train_set}_pos_units.txt
-    json_prefix="data_pos_300"
-    ;;
-  *)
-    echo "Invalid target: $target" && exit 1
-    ;;
-esac
+  if [ "$target" == "word" ]; then
+    SCRIPT=w2v_train.py
+  else
+    SCRIPT=asr_train.py
+  fi
+}
 
-
-
-if [ "$TGT_WORDS" == 1 ]; then
-  SCRIPT=w2v_train.py
-else
-  SCRIPT=asr_train.py
-fi
-
+setup_target
 verbose=${verbose:-0}
-# config_name=$(basename ${train_config%.*})
-# target_name=$(echo $jsontrain | sed "s/data|\.json//g")
-# expname="${train_set}_${config_name}${tag+_$tag}${target_name}"
 train_features=dump/${train_set}/deltafalse
 dev_features=dump/${dev_set}/deltafalse
+validset_tag=${validset_tag:-$dataset_tag}
 
 OPTIONS=""
 if ! [ -z "${enc_init}" ]; then
@@ -59,7 +54,10 @@ if ! [ -z "$dec_init" ]; then
   OPTIONS="$OPTIONS --dec-init $dec_init"
 fi
 
-# output_dir=${output_dir:-exp/$expname}
+if ! [ -z "$tensorboard_dir" ]; then
+  OPTIONS="$OPTIONS --tensorboard-dir $tensorboard_dir"
+fi
+
 mkdir -p $output_dir
 
 (
@@ -70,7 +68,6 @@ mkdir -p $output_dir
     --ngpu ${ngpu} \
     --backend pytorch \
     --outdir $output_dir/results \
-    --tensorboard-dir tensorboard/$(basename $output_dir) \
     --debugmode ${debugmode} \
     --dict ${dict} \
     --ctc_type builtin \
@@ -83,3 +80,4 @@ mkdir -p $output_dir
     | tee $output_dir/train.log
 
 )  3>&1 1>&2 2>&3 | tee $output_dir/train.err
+
