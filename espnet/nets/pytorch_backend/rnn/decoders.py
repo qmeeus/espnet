@@ -6,6 +6,7 @@ import six
 
 import numpy as np
 import torch
+from torch import nn
 import torch.nn.functional as F
 
 from argparse import Namespace
@@ -26,7 +27,7 @@ MAX_DECODER_OUTPUT = 5
 CTC_SCORING_RATIO = 1.5
 
 
-class Decoder(torch.nn.Module, ScorerInterface):
+class Decoder(nn.Module, ScorerInterface):
     """Decoder module
 
     :param int eprojs: encoder projection units
@@ -36,7 +37,7 @@ class Decoder(torch.nn.Module, ScorerInterface):
     :param int dunits: decoder units
     :param int sos: start of sequence symbol id
     :param int eos: end of sequence symbol id
-    :param torch.nn.Module att: attention module
+    :param nn.Module att: attention module
     :param int verbose: verbose level
     :param list char_list: list of character strings
     :param ndarray labeldist: distribution of label smoothing
@@ -51,26 +52,26 @@ class Decoder(torch.nn.Module, ScorerInterface):
                  char_list=None, labeldist=None, lsm_weight=0., sampling_probability=0.0,
                  dropout=0.0, context_residual=False, replace_sos=False, num_encs=1):
 
-        torch.nn.Module.__init__(self)
+        nn.Module.__init__(self)
         self.rnn_type = dtype
         self.dunits = dunits
         self.num_layers = dlayers
         self.context_residual = context_residual
-        self.embed = torch.nn.Embedding(odim, dunits)
-        self.dropout_emb = torch.nn.Dropout(p=dropout)
+        self.embed = nn.Embedding(odim, dunits)
+        self.dropout_emb = nn.Dropout(p=dropout)
 
-        RNN = torch.nn.LSTM if self.rnn_type == "lstm" else torch.nn.GRU
+        RNN = nn.LSTM if self.rnn_type == "lstm" else nn.GRU
         self.rnn = RNN(
             self.embed.embedding_dim + eprojs, 
             dunits, 
             num_layers=dlayers, 
             bidirectional=False,
-            dropout=dropout, 
+            dropout=dropout if dlayers > 1 else 0.,  # Get rid of warning dropout disabled when layers == 1 
             batch_first=False
         )
 
-        # RNNCell = torch.nn.LSTMCell if self.rnn_type == "lstm" else torch.nn.GRUCell
-        # self.rnn = torch.nn.ModuleList([
+        # RNNCell = nn.LSTMCell if self.rnn_type == "lstm" else nn.GRUCell
+        # self.rnn = nn.ModuleList([
         #     RNNCell(
         #         input_size=self.embed.embedding_dim + eprojs if i == 0 else dunits,
         #         hidden_size=dunits
@@ -79,16 +80,18 @@ class Decoder(torch.nn.Module, ScorerInterface):
 
         # # NOTE: dropout is applied only for the vertical connections
         # # see https://arxiv.org/pdf/1409.2329.pdf
-        # self.dropout_dec = torch.nn.ModuleList([
-        #     torch.nn.Dropout(p=dropout) for _ in range(self.num_layers)
+        # self.dropout_dec = nn.ModuleList([
+        #     nn.Dropout(p=dropout) for _ in range(self.num_layers)
         # ])
 
         self.ignore_id = -1
 
-        self.output = torch.nn.Linear(
+        self.output = nn.Linear(
             (dunits + eprojs) if context_residual else dunits, 
             odim
         )
+
+        self.softmax = nn.LogSoftmax(-1)
 
         self.attention = att
         self.dunits = dunits
@@ -218,11 +221,12 @@ class Decoder(torch.nn.Module, ScorerInterface):
             if self.context_residual:
                 dec_out = torch.cat([dec_out, att_c], dim=-1) # utt x (zdim + hdim)
 
-            attention_weights.append(att_w)
+            attention_weights.append(att_w.detach().cpu().numpy())
             decoder_outputs.append(dec_out)
 
         decoder_outputs = torch.stack(decoder_outputs, dim=1).view(batch_size * max_output_length, -1)
-        return self.output(decoder_outputs), attention_weights
+        attention_weights = np.stack(attention_weights, 1)
+        return self.output(decoder_outputs), attention_weights, (hidden_states, cell_states)
 
     def compute_loss(self, hs_pad, hlens, ys_pad, strm_idx=0):
         batch_size, max_output_length = ys_pad.size()
@@ -240,7 +244,7 @@ class Decoder(torch.nn.Module, ScorerInterface):
         logging.debug(f"input lengths: {hlens[0]}.")
         logging.debug(f"{self.__class__.__name__} output lengths: {[len(y) for y in y_true]}")
 
-        predictions, _ = self.forward(hs_pad, hlens, prev_output_tokens)
+        predictions, _, _ = self.forward(hs_pad, hlens, prev_output_tokens)
 
         loss = F.cross_entropy(predictions, y_true_pad.view(-1),
                                ignore_index=self.ignore_id,
@@ -261,10 +265,15 @@ class Decoder(torch.nn.Module, ScorerInterface):
         if self.labeldist is not None:
             if self.vlabeldist is None:
                 self.vlabeldist = to_device(self, torch.from_numpy(self.labeldist))
-            loss_reg = -torch.sum((F.log_softmax(predictions, dim=1) * self.vlabeldist).view(-1), dim=0) / len(y_true)
+            loss_reg = -torch.sum((self.softmax(predictions) * self.vlabeldist).view(-1), dim=0) / len(y_true)
             loss = (1. - self.lsm_weight) * loss + self.lsm_weight * loss_reg
 
         return loss, acc, ppl
+
+    def get_prev_output_tokens(self, ys_pad):
+        ys = [y[y != self.ignore_id] for y in ys_pad]  # parse padded ys
+        average_length = np.mean(list(map(len, ys)))
+        return self._add_sos_token(ys, pad=True, pad_value=self.eos)
 
     def _sample_from_previous_output(self, prediction):
         logging.debug(' scheduled sampling ')
@@ -312,7 +321,7 @@ class Decoder(torch.nn.Module, ScorerInterface):
                                 [in multi-encoder case, list of torch.Tensor, [(T1, odim), (T2, odim), ...] ]
         :param Namespace recog_args: argument Namespace containing options
         :param char_list: list of character strings
-        :param torch.nn.Module rnnlm: language module
+        :param nn.Module rnnlm: language module
         :param int strm_idx: stream index for speaker parallel attention in multi-speaker case
         :return: N-best decoding results
         :rtype: list of dicts
@@ -326,13 +335,16 @@ class Decoder(torch.nn.Module, ScorerInterface):
 
         for idx in range(self.num_encs):
             logging.debug('Number of Encoder:{}; enc{}: input lengths: {}.'.format(self.num_encs, idx + 1, h[0].size(0)))
+        
         att_idx = min(strm_idx, len(self.attention) - 1)
         # initialization
         c_list = [self.zero_state(h[0].unsqueeze(0))]
         z_list = [self.zero_state(h[0].unsqueeze(0))]
-        for _ in six.moves.range(1, self.num_layers):
+
+        for _ in range(1, self.num_layers):
             c_list.append(self.zero_state(h[0].unsqueeze(0)))
             z_list.append(self.zero_state(h[0].unsqueeze(0)))
+
         if self.num_encs == 1:
             a = None
             self.attention[att_idx].reset()  # reset pre-computation of h
@@ -378,6 +390,7 @@ class Decoder(torch.nn.Module, ScorerInterface):
                    'z_prev': z_list, 'a_prev': a, 'rnnlm_prev': None}
         else:
             hyp = {'score': 0.0, 'yseq': [y], 'c_prev': c_list, 'z_prev': z_list, 'a_prev': a}
+
         if lpz[0] is not None:
             ctc_prefix_score = [CTCPrefixScore(lpz[idx].detach().numpy(), 0, self.eos, np) for idx in
                                 range(self.num_encs)]
@@ -388,6 +401,7 @@ class Decoder(torch.nn.Module, ScorerInterface):
                 ctc_beam = min(lpz[0].shape[-1], int(beam * CTC_SCORING_RATIO))
             else:
                 ctc_beam = lpz[0].shape[-1]
+        
         hyps = [hyp]
         ended_hyps = []
 
@@ -418,7 +432,7 @@ class Decoder(torch.nn.Module, ScorerInterface):
                     logits = self.output(torch.cat((self.dropout_dec[-1](z_list[-1]), att_c), dim=-1))
                 else:
                     logits = self.output(self.dropout_dec[-1](z_list[-1]))
-                local_att_scores = F.log_softmax(logits, dim=1)
+                local_att_scores = self.softmax(logits)
                 if rnnlm:
                     rnnlm_state, local_lm_scores = rnnlm.predict(hyp['rnnlm_prev'], vy)
                     local_scores = local_att_scores + recog_args.lm_weight * local_lm_scores
@@ -442,6 +456,7 @@ class Decoder(torch.nn.Module, ScorerInterface):
                                 ctc_scores[idx] - hyp['ctc_score_prev'][idx])
                     if rnnlm:
                         local_scores += recog_args.lm_weight * local_lm_scores[:, local_best_ids[0]]
+        
                     local_best_scores, joint_best_ids = torch.topk(local_scores, beam, dim=1)
                     local_best_ids = local_best_ids[:, joint_best_ids[0]]
                 else:
@@ -653,7 +668,7 @@ class Decoder(torch.nn.Module, ScorerInterface):
                 logits = self.output(torch.cat((self.dropout_dec[-1](z_list[-1]), att_c), dim=-1))
             else:
                 logits = self.output(self.dropout_dec[-1](z_list[-1]))
-            local_scores = att_weight * F.log_softmax(logits, dim=1)
+            local_scores = att_weight * self.softmax(logits)
 
             # rnnlm
             if rnnlm:
@@ -783,10 +798,10 @@ class Decoder(torch.nn.Module, ScorerInterface):
         ys = [y[y != self.ignore_id] for y in ys_pad]  # parse padded ys
         # hlen should be list of list of integer
         prev_output_tokens = self._add_sos_token(ys, pad=True, pad_value=self.eos)
-        _, att_ws = self.forward(hs_pad, hlens, prev_output_tokens)
+        _, att_ws, _ = self.forward(hs_pad, hlens, prev_output_tokens)
 
         # convert to numpy array with the shape (B, Lmax, Tmax)
-        return att_to_numpy(att_ws, self.attention[0])
+        return att_ws
 
     @staticmethod
     def _get_last_yseq(exp_yseq):
@@ -848,35 +863,28 @@ class Decoder(torch.nn.Module, ScorerInterface):
         return dict(c_prev=c_list[:], z_prev=z_list[:], a_prev=a, workspace=(att_idx, z_list, c_list))
 
     def score(self, yseq, state, x):
-        # to support mutiple encoder asr mode, in single encoder mode, convert torch.Tensor to List of torch.Tensor
-        if self.num_encs == 1:
-            x = [x]
+
+        hs_pad = x.unsqueeze(0)
+        hlens = torch.as_tensor([x.size(0)])
+        hidden_states = state['z_prev']
+        att_w = state['a_prev']
+        prev_output_tokens = yseq[-1].unsqueeze(0)
 
         att_idx, z_list, c_list = state["workspace"]
-        vy = yseq[-1].unsqueeze(0)
-        ey = self.dropout_emb(self.embed(vy))  # utt list (1) x zdim
-        if self.num_encs == 1:
-            att_c, att_w = self.attention[att_idx](
-                x[0].unsqueeze(0), [x[0].size(0)],
-                self.dropout_dec[0](state['z_prev'][0]), state['a_prev'])
-        else:
-            att_w = [None] * (self.num_encs + 1)  # atts + han
-            att_c_list = [None] * (self.num_encs)  # atts
-            for idx in range(self.num_encs):
-                att_c_list[idx], att_w[idx] = self.attention[idx](x[idx].unsqueeze(0), [x[idx].size(0)],
-                                                            self.dropout_dec[0](state['z_prev'][0]),
-                                                            state['a_prev'][idx])
-            h_han = torch.stack(att_c_list, dim=1)
-            att_c, att_w[self.num_encs] = self.attention[self.num_encs](h_han, [self.num_encs],
-                                                                  self.dropout_dec[0](state['z_prev'][0]),
-                                                                  state['a_prev'][self.num_encs])
+        
+        ey = self.dropout_emb(self.embed(prev_output_tokens))  # utt list (1) x zdim
+
+        att_c, att_w = self.attention[att_idx](hs_pad, hlens, hidden_states[0], att_w)
+
         ey = torch.cat((ey, att_c), dim=1)  # utt(1) x (zdim + hdim)
-        z_list, c_list = self.rnn_forward(ey, z_list, c_list, state['z_prev'], state['c_prev'])
+        hidden_states = torch.as_tensor(state['z_prev'][0]).type_as(ey).unsqueeze(0)
+        cell_states = torch.as_tensor(state['c_prev'][0]).type_as(ey).unsqueeze(0)
+        hidden_states, cell_states = self.rnn_forward(ey, (hidden_states, cell_states))
         if self.context_residual:
-            logits = self.output(torch.cat((self.dropout_dec[-1](z_list[-1]), att_c), dim=-1))
+            logits = self.output(torch.cat((hidden_states, att_c), dim=-1))
         else:
-            logits = self.output(self.dropout_dec[-1](z_list[-1]))
-        logp = F.log_softmax(logits, dim=1).squeeze(0)
+            logits = self.output(z_list[-1])
+        logp = self.softmax(logits).squeeze(0)
         return logp, dict(c_prev=c_list[:], z_prev=z_list[:], a_prev=att_w, workspace=(att_idx, z_list, c_list))
 
 

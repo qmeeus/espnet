@@ -21,6 +21,7 @@ import six
 import torch
 
 from itertools import groupby
+from operator import itemgetter
 
 from chainer import reporter
 
@@ -38,7 +39,7 @@ from espnet.nets.pytorch_backend_.rnn.encoders import encoder_for
 from espnet.nets.scorers.ctc import CTCPrefixScorer
 
 
-CTC_LOSS_THRESHOLD = 10000
+CTC_LOSS_THRESHOLD = 1e4
 
 
 class Reporter(chainer.Chain):
@@ -149,20 +150,20 @@ class E2E(ASRInterface, torch.nn.Module):
         super(E2E, self).__init__()
         torch.nn.Module.__init__(self)
 
-        # Setup multitask learning loss 
+        # Setup multitask learning loss
         self.mtlalpha = args.mtlalpha
         assert 0.0 <= self.mtlalpha <= 1.0, "mtlalpha should be [0.0, 1.0]"
 
         # Remove unused metrics
         if self.mtlalpha == 1:
-            if "loss_att" in self.LOSS_NAMES: 
+            if "loss_att" in self.LOSS_NAMES:
                 self.LOSS_NAMES.remove("loss_att")
-            if "accuracy" in self.METRIC_NAMES: 
+            if "accuracy" in self.METRIC_NAMES:
                 self.METRIC_NAMES.remove("accuracy")
         elif self.mtlalpha == 0:
-            if "loss_ctc" in self.LOSS_NAMES: 
+            if "loss_ctc" in self.LOSS_NAMES:
                 self.LOSS_NAMES.remove("loss_ctc")
-            if "cer_ctc" in self.METRIC_NAMES: 
+            if "cer_ctc" in self.METRIC_NAMES:
                 self.METRIC_NAMES.remove("cer_ctc")
                 self.METRIC_NAMES.remove("ter_ctc")
 
@@ -220,7 +221,7 @@ class E2E(ASRInterface, torch.nn.Module):
             self.report_wer = False
         self.rnnlm = None
 
-        self.logzero = -10000000000.0
+        self.logzero = -1e10
 
     def init_like_chainer(self):
         """Initialize weight like chainer.
@@ -233,6 +234,31 @@ class E2E(ASRInterface, torch.nn.Module):
         """
         lecun_normal_init_parameters(self)
         self.decoder.init_weights()
+
+    def _forward(self, xs_pad, ilens, ys_pad):
+
+        # 0. Frontend
+        if self.frontend is not None:
+            hs_pad, hlens, mask = self.frontend(to_torch_tensor(xs_pad), ilens)
+            hs_pad, hlens = self.feature_transform(hs_pad, hlens)
+        else:
+            hs_pad, hlens = xs_pad, ilens
+
+        logging.debug(f"Input size: {hs_pad.size()} Output size: {ys_pad.size()}")
+
+        # 1. Encoder
+        hs_pad, hlens, _ = self.encoder(hs_pad, hlens)
+        logging.debug(f"Enc out: {hs_pad.size()}")
+
+        # 2. CTC
+        ctc_out = self.ctc(hs_pad)
+
+        # 3. Decoder
+        prev_output_tokens = self.decoder.get_prev_output_tokens(ys_pad)
+        dec_out, att, states = self.decoder(hs_pad, hlens, prev_output_tokens)
+
+        return hs_pad, hlens, ctc_out, dec_out, att, states
+
 
     def forward(self, xs_pad, ilens, ys_pad, calc_metrics=False, compat_on=True):
         """E2E forward.
@@ -275,12 +301,12 @@ class E2E(ASRInterface, torch.nn.Module):
             if compat_on:
                 # 4. Log metrics
                 self.log_metrics(output)
-            
+
             if not compat_on:
                 return output
 
         if compat_on:
-            return output["loss"]        
+            return output["loss"]
 
         return losses
 
@@ -311,13 +337,13 @@ class E2E(ASRInterface, torch.nn.Module):
 
         # 1. CTC loss
         loss_ctc = (
-            self.ctc.compute_loss(hs_pad, hlens, ys_pad) 
+            self.ctc.compute_loss(hs_pad, hlens, ys_pad)
             if alpha > 0 else None
         )
-        
+
         # 2. attention loss
         loss_att, accuracy, _ = (
-            self.decoder.compute_loss(hs_pad, hlens, ys_pad) 
+            self.decoder.compute_loss(hs_pad, hlens, ys_pad)
             if alpha < 1 else [None] * 3
         )
 
@@ -325,9 +351,9 @@ class E2E(ASRInterface, torch.nn.Module):
         loss = alpha * (loss_ctc or 0) + (1 - alpha) * (loss_att or 0)
 
         return {
-            "loss": loss, 
-            "loss_ctc": loss_ctc.item() if loss_ctc else None, 
-            "loss_att": loss_att.item() if loss_att else None, 
+            "loss": loss,
+            "loss_ctc": loss_ctc.item() if loss_ctc else None,
+            "loss_att": loss_att.item() if loss_att else None,
             "accuracy": accuracy
         }
 
@@ -361,12 +387,16 @@ class E2E(ASRInterface, torch.nn.Module):
 
         ters = []
         blank_index = self.char_list.index(self.blank)
-        y_hats = self.ctc.argmax(hs_pad).data
-        for i, y in enumerate(y_hats):
-            y_hat = [x[0] for x in groupby(y)]
-            y_true = ys_pad[i]
+        pad_index = -1
+        ys_true = ys_pad.tolist()
+        ys_hat = self.ctc.argmax(hs_pad).tolist()
+        for i, (y_hat, y_true) in enumerate(zip(ys_hat, ys_true)):
+            y_hat = list(filter(lambda x: x != blank_index, map(itemgetter(0), groupby(y_hat))))
+            y_true = list(filter(lambda x: x != pad_index, y_true))
 
-            y_hat = list(filter(lambda x: x != blank_index, y_hat))
+            if self.eos in y_hat:
+                y_hat = y_hat[:y_hat.index(self.eos)]
+
             if len(y_true):
                 ters.append(editdistance.eval(y_hat, y_true) / len(y_true))
 
@@ -415,7 +445,7 @@ class E2E(ASRInterface, torch.nn.Module):
 
     def scorers(self):
         """Scorers."""
-        return dict(decoder=self.decoder, ctc=CTCPrefixScorer(self.ctc.compute_loss, self.eos))
+        return dict(decoder=self.decoder, ctc=CTCPrefixScorer(self.ctc, self.eos))
 
     def encode(self, x):
         """Encode acoustic features.
@@ -425,7 +455,6 @@ class E2E(ASRInterface, torch.nn.Module):
         :rtype: torch.Tensor
         """
         self.eval()
-        ilens = [x.shape[0]]
 
         # subsample frame
         x = x[::self.subsample[0], :]
@@ -433,6 +462,8 @@ class E2E(ASRInterface, torch.nn.Module):
         h = torch.as_tensor(x, device=p.device, dtype=p.dtype)
         # make a utt list (1) to use the same interface for encoder
         hs = h.contiguous().unsqueeze(0)
+
+        ilens = torch.as_tensor([x.shape[0]], device=p.device)
 
         # 0. Frontend
         if self.frontend is not None:
@@ -479,7 +510,7 @@ class E2E(ASRInterface, torch.nn.Module):
         """
         prev = self.training
         self.eval()
-        ilens = np.fromiter((xx.shape[0] for xx in xs), dtype=np.int64)
+        ilens = torch.as_tensor(np.fromiter((xx.shape[0] for xx in xs), dtype=np.int64))
 
         # subsample frame
         xs = [xx[::self.subsample[0], :] for xx in xs]

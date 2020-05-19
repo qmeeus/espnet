@@ -37,6 +37,7 @@ class CTC(torch.nn.Module):
 
         self.ignore_id = -1
         self.reduce = reduce
+        self.softmax = nn.LogSoftmax(-1)
 
     def loss_fn(self, th_pred, th_target, th_ilen, th_olen):
         if self.ctc_type == 'builtin':

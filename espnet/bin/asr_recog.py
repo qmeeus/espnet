@@ -174,14 +174,15 @@ def main(args):
     # recog
     logging.info('backend = ' + args.backend)
     # Experimental API that supports custom LMs
-    if args.api == "v2":
-        from espnet.asr.pytorch_backend.recog import recog_v2
-        recog_v2(args)
-    else:
-        from espnet.asr.pytorch_backend.asr import recog
-        if args.dtype != "float32":
-            raise NotImplementedError(f"`--dtype {args.dtype}` is only available with `--api v2`")
-        recog(args)
+
+    from espnet.asr.pytorch_backend.recog import recog
+    # if args.api == "v2":
+    #     from espnet.asr.pytorch_backend.recog import recog_v2 as recog
+    # else:
+    #     from espnet.asr.pytorch_backend.asr import recog
+    #     if args.dtype != "float32":
+    #         raise NotImplementedError(f"`--dtype {args.dtype}` is only available with `--api v2`")
+    recog(args)
 
 
 if __name__ == '__main__':
