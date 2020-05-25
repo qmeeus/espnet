@@ -52,7 +52,7 @@ for dataset in $(ls $test_features/${json_prefix}.?.json); do
 done
 
 i=0; for pid in "${pids[@]}"; do wait ${pid} || ((++i)); done
-if [ ${i} -gt 0 ]; then 
+if [ ${i} -gt 0 ]; then
     echo "$0: ${i} background jobs are failed."
     exit 1
 fi

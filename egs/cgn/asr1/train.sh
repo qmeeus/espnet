@@ -46,17 +46,10 @@ dev_features=dump/${dev_set}/deltafalse
 validset_tag=${validset_tag:-$dataset_tag}
 
 OPTIONS=""
-if ! [ -z "${enc_init}" ]; then
-  OPTIONS="--enc-init $enc_init"
-fi
-
-if ! [ -z "$dec_init" ]; then
-  OPTIONS="$OPTIONS --dec-init $dec_init"
-fi
-
-if ! [ -z "$tensorboard_dir" ]; then
-  OPTIONS="$OPTIONS --tensorboard-dir $tensorboard_dir"
-fi
+[ -z "${enc_init}" ] || OPTIONS="--enc-init $enc_init"
+[ -z "$dec_init" ] || OPTIONS="$OPTIONS --dec-init $dec_init"
+[ -z "$tensorboard_dir" ] || OPTIONS="$OPTIONS --tensorboard-dir $tensorboard_dir"
+[ -z "$freeze_encoder" ] || OPTIONS="$OPTIONS --freeze-encoder $freeze_encoder"
 
 mkdir -p $output_dir
 

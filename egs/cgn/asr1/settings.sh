@@ -28,6 +28,7 @@ exp_config=
 # lm_vocabsize=100    # effective only for word LMs
 # lmtag=              # tag for managing LMs
 # lm_resume=          # specify a snapshot file to resume LM training
+freeze_encoder=
 
 # decoding parameter
 recog_model=model.loss.best # set a model to be used for decoding: 'model.acc.best' or 'model.loss.best'
