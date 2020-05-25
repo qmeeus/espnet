@@ -218,12 +218,12 @@ class E2E(ASRInterface, torch.nn.Module):
         loss_data = float(self.loss)
         if loss_data < CTC_LOSS_THRESHOLD and not math.isnan(loss_data):
             self.reporter.report(
-                loss_ctc=loss_ctc_data, 
-                loss_att=loss_att_data, 
-                accuracy=self.acc, 
-                cer_ctc=cer_ctc, 
-                cer=cer, 
-                wer=wer, 
+                loss_ctc=loss_ctc_data,
+                loss_att=loss_att_data,
+                accuracy=self.acc,
+                cer_ctc=cer_ctc,
+                cer=cer,
+                wer=wer,
                 loss=loss_data)
         else:
             logging.warning('loss (=%f) is not correct', loss_data)
