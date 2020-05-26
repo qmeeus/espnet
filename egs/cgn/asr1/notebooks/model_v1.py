@@ -202,7 +202,7 @@ def plot_comparison(results, groups, criterion="validation/main/loss", ascending
         .drop([
             "model_id", "eps", "main/wer", "main/cer", "validation/main/wer", 
             "validation/main/cer", "iteration"], axis=1)
-        .droplevel([0,1,2])
+        .droplevel([0,1])
 #         .assign(elapsed_time=lambda df: df.elapsed_time / 100)
     )
     
