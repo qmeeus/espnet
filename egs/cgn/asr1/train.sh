@@ -16,7 +16,7 @@ setup_target(){
       json_prefix="data"
       ;;
     "wordpiece")
-      dict=data/lang_char/${train_set}_unigram_${vocab_size}_units.txt
+      dict=data/lang_unigram/${train_set}_unigram_${vocab_size}_units.txt
       json_prefix="data_unigram_${vocab_size}"
       ;;
     "word")

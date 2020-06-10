@@ -10,6 +10,7 @@ from IPython.display import display
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("data", type=Path)
+    parser.add_argument("--annot-file", type=Path, default="annotations.csv")
     parser.add_argument("--prefix", type=str, default=None)
     parser.add_argument("--train-size", type=float, default=.8)
     parser.add_argument("--valid-size", type=float, default=.05)
@@ -23,12 +24,12 @@ args = parse_args()
 subsets = ["train", "valid", "test"]
 
 feats = (
-    pd.read_csv(Path(args.data, "feats.scp"),
+    pd.read_csv(args.data / "feats.scp",
                 header=None,
                 names=["uttid", "features"],
                 sep=" ",
                 index_col="uttid")
-    .join(pd.read_csv(Path(args.data, "annotations.csv"), index_col="uttid"),how='left')
+    .join(pd.read_csv(args.data / args.annot_file, index_col="uttid"),how='left')
 )
 
 for subset in subsets:

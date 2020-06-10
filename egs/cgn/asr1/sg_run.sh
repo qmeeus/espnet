@@ -13,12 +13,9 @@ if [ "$1" == "--dev" ]; then
 fi
 
 if [ "$#" -lt 1 ]; then
-  echo "Missing script to run"
+  echo "Missing command to run"
   exit 1
 fi
 
-SCRIPT="$1"
-shift
-
-singularity exec --nv $IMAGE ./$SCRIPT $@
+singularity exec --nv $IMAGE $@
 

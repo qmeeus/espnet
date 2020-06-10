@@ -1,4 +1,5 @@
 # coding: utf-8
+import os
 import json
 import pandas as pd
 import argparse
@@ -8,7 +9,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("json_prefix", type=str, help="prefix of global json file")
     parser.add_argument("--splits", type=Path, default="data/CGN_ALL/splits.csv", help="CSV file with splits")
-    parser.add_argument("--groups", nargs="*", default=["o", "ok", "ijklmno"], help="components to include in each dataset")
+    parser.add_argument("--groups", nargs="*", default=["o", "ok", "jklmno"], help="components to include in each dataset")
     parser.add_argument("--group-names", nargs="*", default=["o", "ok", "mono"], help="dataset tags")
     parser.add_argument("--dump", type=Path, default="dump", help="location of dump directory")
     parser.add_argument("--subsets", nargs="*", default=["train", "valid"], help="subsets on which to apply the split")
@@ -21,7 +22,8 @@ def main():
     splits = pd.read_csv(options.splits, index_col="uttid")
     for subset in options.subsets:
         subset_dir = Path(f"dump/CGN_{subset}/deltafalse")
-        with open(Path(subset_dir, f"{options.json_prefix}.json")) as f:
+        global_json = subset_dir / f"{options.json_prefix}.json"
+        with open(global_json) as f:
             dataset = json.load(f)["utts"]
 
         for group_name, group in zip(options.group_names, options.groups):
@@ -30,9 +32,10 @@ def main():
             filename = Path(subset_dir, f"{options.json_prefix}.{group_name}.json")
             with open(filename, "w") as outfile:
                 json.dump({"utts": selection}, outfile, indent=4, sort_keys=True)
-            
+
             print(f"{len(selection)} items saved to {filename}")
 
+        os.rename(global_json, str(global_json).replace(".json", ".all.json"))
 
 if __name__ == "__main__":
     main()

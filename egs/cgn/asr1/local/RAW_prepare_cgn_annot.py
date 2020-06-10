@@ -16,8 +16,9 @@ ANNOT_DIR = Path(CGN, "CDdata/CGN_V1.0_elda_ann/data")
 SPKR_META = Path(ANNOT_DIR, "meta/text/speakers.txt")
 ANNOT_XML = Path(ANNOT_DIR, "annot/xml")
 ORT, TAG = (Path(ANNOT_XML, d) for d in ("skp-ort", "tag"))
+OUTPUT_DIR = Path("/users/spraak/qmeeus/spchdisk/repos/espnet/egs/cgn/asr1/data/CGN_ALL")
+ANNOT_FILE = Path(OUTPUT_DIR, "annotations.csv")
 
-OUTPUT_DIR = "/users/spraak/qmeeus/spchdisk/repos/espnet/egs/cgn/asr1/data/CGN_ALL"
 FILTER_LANG = ["vl"]
 FILTER_COMP = []
 MIN_LENGTH_SEC = 2
@@ -113,10 +114,11 @@ def create_wav_scp(files):
 
     def _format(wavfile):
         wavfile = Path(wavfile)
-        return f"{wavfile.stem} sox -t wav {Path(CGN, wavfile)} -b 16 -t wav - remix - |"
+        return f"{wavfile.stem} sox -t wav {Path(CGN, wavfile)} -b 16 -t wav - remix - |\n"
 
     with open(Path(OUTPUT_DIR, "wav.scp"), 'w') as f:
-        f.write("\n".join(files["audio"].map(_format)))
+        for line in files.sort_values("name")["audio"].map(_format):
+            f.write(line)
 
 
 def create_annotations(files):
@@ -135,17 +137,18 @@ def create_annotations(files):
     if DROP_UNKNOWN_SPEAKERS:
         annotations = annotations.where(annotations["speaker"] != "UNKNOWN").dropna(how="all")
 
-    annotations.to_csv(Path(OUTPUT_DIR, "annotations.csv"), index=False)
+    annotations.to_csv(ANNOT_FILE, index=False)
     return annotations
 
 
 def write(data:pd.DataFrame, filename:str):
-    row_to_string = lambda row: " ".join([str(row[col]) for col in data.columns])
+    row_to_string = lambda row: " ".join([str(row[col]) for col in data.columns]) + "\n"
     filename = Path(OUTPUT_DIR, filename)
     with open(filename, "w") as f:
-        f.write("\n".join(data.apply(row_to_string, axis=1)))
+        for line in data.apply(row_to_string, axis=1):
+            f.write(line)
     print(f"{len(data)} lines written to {filename}")
-    
+
 
 def create_all_files(filelist):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -176,10 +179,15 @@ def create_spk2utt(annotations):
     write(spk2utt, "spk2utt")
     return spk2utt
 
+def create_utt2dur(annotations):
+    utt2dur = annotations[["uttid", "duration"]].copy()
+    utt2dur["duration"] = utt2dur["duration"].map("{:.3f}".format)
+    write(utt2dur, "utt2dur")
 
 def create_segments(annotations):
-    segments = annotations[["uttid", "name", "start", "end"]]
-    write(segments, "spk2utt")
+    segments = annotations[["uttid", "name", "start", "end"]].copy()
+    segments.update(segments[["start", "end"]].applymap("{:.3f}".format))
+    write(segments, "segments")
     return segments
 
 
@@ -189,44 +197,79 @@ def create_text(annotations):
     return texts
 
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--annot-file", default=ANNOT_FILE, type=Path)
+    parser.add_argument("--file-list", default=CSV_DUMP, type=Path)
+    parser.add_argument("--output-dir", default=OUTPUT_DIR, type=Path)
+    parser.add_argument("--components", nargs="*", default=list("abfghijklmno"), type=list)
+    parser.add_argument("--lang", nargs="*", default=["vl"], type=list)
+    parser.add_argument("--use-existing-annot", action="store_true")
+    parser.add_argument("--use-existing-file-registry", action="store_true")
+    return parser.parse_args()
+
+
 
 if __name__ == '__main__':
 
-    create_all_files(CSV_DUMP)
+    options = parse_args()
 
+    os.makedirs(options.output_dir, exist_ok=True)
+
+    files = (pd.read_csv(options.file_list)
+             if options.use_existing_file_registry
+             else load_files_meta())
+
+    annotations = (
+        (pd.read_csv(options.annot_file)
+         if options.use_existing_annot
+         else create_annotations(files))
+        .where(lambda df: df["comp"].isin(list(map("comp-{}".format, options.components))))
+        .dropna(how='all').sort_values("uttid")
+    )
+
+    files = (
+        files.loc[files["name"].isin(annotations["name"].unique())]
+        .sort_values("name").copy()
+    )
+
+    create_wav_scp(files)
+
+    for func in (create_utt2spk, create_spk2utt, create_utt2dur, create_segments, create_text):
+        func(annotations)
 
 """
 def get_opts():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--cgn", 
-                        type=path_type(should_exist=True, resolve=True), 
-                        default="~/data/cgn", 
+    parser.add_argument("--cgn",
+                        type=path_type(should_exist=True, resolve=True),
+                        default="~/data/cgn",
                         help="CGN root")
 
-    parser.add_argument("--filelist", 
-                        type=path_type(should_exist=True, resolve=True), 
+    parser.add_argument("--filelist",
+                        type=path_type(should_exist=True, resolve=True),
                         default="~/spchdisk/repos/espnet/egs/cgn/asr1/data/datafiles.csv",
                         help="CSV file containing the path to the audiofiles relative to CGN root")
 
-    parser.add_argument("--annot-dir", 
-                        type=path_type(), 
-                        default="CDdata/CGN_V1.0_elda_ann/data", 
+    parser.add_argument("--annot-dir",
+                        type=path_type(),
+                        default="CDdata/CGN_V1.0_elda_ann/data",
                         help="Where to find the annotations, relative to CGN root")
 
     parser.add_argument("--speaker-metadata",
-                        type=path_type(), 
+                        type=path_type(),
                         default="meta/text/speakers.txt",
                         help="File containing the speakers information, relative to annot dir")
 
     parser.add_argument("--annot-xml-dir",
-                        type=path_type(), 
+                        type=path_type(),
                         default="annot/xml",
                         help="Folder where to find xml files with annotations, relative to annot dir")
 
-    parser.add_argument("--output-dir", 
-                        type=path_type(resolve=True), 
-                        default="~/spchdisk/repos/espnet/egs/cgn/asr1/data/CGN_ALL", 
+    parser.add_argument("--output-dir",
+                        type=path_type(resolve=True),
+                        default="~/spchdisk/repos/espnet/egs/cgn/asr1/data/CGN_ALL",
                         help="Where to store the dataset")
 
     parser.add_argument("--lang", args="+", )
