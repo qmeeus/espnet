@@ -35,17 +35,13 @@ setup_target(){
 }
 
 setup_target
-train_features=dump/${train_set}/deltafalse
-dev_features=dump/${dev_set}/deltafalse
 test_features=dump/${test_set}/deltafalse
-#mkdir -p $output_dir
 
-n_jobs=1
 pids=() # initialize pids
 for rtask in ${recog_set}; do
   (
-    decode_dir=${output_dir}/${rtask}
-    mkdir -p $decode_dir
+    outdir=${output_dir}/${rtask}
+    mkdir -p $outdir
 
     asr_recog.py \
       --ngpu ${ngpu:-0} \
@@ -55,13 +51,14 @@ for rtask in ${recog_set}; do
       --debugmode ${debugmode} \
       --verbose ${verbose} \
       --recog-json ${test_features}/${json_prefix}.${rtask}.json \
-      --result-label ${output_dir}/results.${rtask}.json \
+      --result-label ${outdir}/results.json \
       --model ${recog_model} \
-      2>&1 | tee ${decode_dir}/decode.log
+      > $outdir/test.log 2> $outdir/test.err
 
     #score_sclite.sh ${decode_dir} ${dict}
 
   ) &
+
   pids+=($!) # store background pids
 done
 
