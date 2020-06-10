@@ -75,27 +75,21 @@ def recog(args):
     def ter(y_true, y_pred):
         return editdistance(y_true, y_pred) / len(y_true)
 
-    def plot_attention(att, uttid):
+    def plot_attention(att, uttid, save_numpy=True):
         sns.heatmap(att, cbar=False, cmap="viridis")
         plt.xlabel("Encoder index"); plt.ylabel("Decoder index")
         plt.tight_layout()
         plt.savefig(Path(att_dir, f"{uttid}.png"))
         plt.close()
 
-    stats = OrderedDict({
-        "id": [],
-        "cer_ctc": [],
-        "ter_ctc": [],
-        "cer_dec": [],
-        "ter_dec": [],
-        "pred_ctc": [],
-        "pred_dec": [],
-        "groundtruth": []
-    })
+        if save_numpy:
+            np.save(Path(att_dir, f"{uttid}.npy"), att)
 
+    results = {}
     with torch.no_grad():
 
         for idx, (uttid, sample) in enumerate(test_data.items(), 1):
+            output = {}
             logging.info(f'({idx:d}/{len(test_data):d}) decoding {uttid}')
             xs = torch.as_tensor(kaldiio.load_mat(sample["input"][0]["feat"])).to(device).unsqueeze(0)
             xlens = torch.as_tensor([xs.size(1)]).to(device)
@@ -104,11 +98,13 @@ def recog(args):
             hs_pad, hlens, ctc_out, dec_out, att, states = model._forward(xs, xlens, ys)
             ctc_prob = model.ctc.softmax(ctc_out)
             dec_prob = model.decoder.softmax(dec_out)
-            ctc_pred = torch.argmax(ctc_prob, -1).cpu().detach().numpy()
+            ctc_pred = torch.argmax(ctc_prob, -1).cpu().detach().numpy()[0]
             dec_pred = torch.argmax(dec_prob, -1).cpu().detach().numpy()
-
             ys = ys.cpu().detach().numpy()[0]
-            ctc_pred = clean_ctc_pred(ctc_pred[0])
+
+            output["ctc_raw_pred"] = [model.char_list[sym] for sym in ctc_pred]
+            output["dec_raw_pred"] = [model.char_list[sym] for sym in dec_pred]
+            ctc_pred = clean_ctc_pred(ctc_pred)
             dec_pred = clean_dec_pred(dec_pred)
 
             metrics = cer_ctc, ter_ctc, cer_dec, ter_dec = [
@@ -122,6 +118,14 @@ def recog(args):
                 for y in (ctc_pred, dec_pred, ys)
             ]
 
+            output["groundtruth"] = groundtruth
+            output["ctc_sent"] = ctc_sent
+            output["dec_sent"] = dec_sent
+            output["cer_ctc"] = cer_ctc
+            output["ter_ctc"] = ter_ctc
+            output["cer_dec"] = cer_dec
+            output["ter_dec"] = ter_dec
+
             logging.info(f"Ground truth: {groundtruth}")
             logging.info(f"Decoder prediction: {dec_sent}")
             logging.info(f"CTC prediction: {ctc_sent}")
@@ -129,15 +133,12 @@ def recog(args):
                 f"[ Decoder CER {cer_dec:.2%} TER {ter_dec:.2%} ] [ CTC CER {cer_ctc:.2%} TER {ter_ctc:.2%} ]"
             )
 
-            for key, value in zip(list(stats), [uttid] + metrics + sentences):
-                stats[key] += [value]
-                logging.debug(f"{key}: {value}")
+            results[uttid] = output
 
             plot_attention(att[0], uttid)
 
     with open(args.result_label, 'wb') as f:
-        f.write(json.dumps({'utts': stats}, indent=4, ensure_ascii=False, sort_keys=True).encode('utf_8'))
-
+        f.write(json.dumps({'results': results}, indent=4, ensure_ascii=False, sort_keys=True).encode('utf_8'))
 
 def recog_v2(args):
     """Decode with custom models that implements ScorerInterface.
