@@ -80,12 +80,13 @@ def build_model(list_input_dim, output_dim, args):
     for key in sorted(vars(args).keys()):
         logging.info('ARGS: ' + key + ': ' + str(vars(args)[key]))
 
+    return model
+
+def display_model(model):
     for line in str(model).split("\n"):
         logging.info(line)
 
     logging.info(f"# Params: {count_parameters(model):,}")
-
-    return model
 
 
 def get_optimizer(model, args, reporter):
@@ -197,9 +198,18 @@ def train(args):
         
     reporter = model.reporter
     model = model.to(device=device, dtype=dtype)
-    optimizer = get_optimizer(model, args, reporter)
-    if args.freeze_encoder:
-        decoder_optimizer = get_optimizer(model.encoder, args, reporter)
+
+    if args.freeze_encoder == -1:
+        logging.warn("Freeze the encoder and disabling gradients for this module")
+        optimizer = get_optimizer(model.decoder, args, reporter)
+        for param in model.encoder.parameters():
+            param.requires_grad = False
+    else:
+        optimizer = get_optimizer(model, args, reporter)
+        if args.freeze_encoder > 0:
+            decoder_optimizer = get_optimizer(model.decoder, args, reporter)
+
+    display_model(model)
 
     args.use_apex = False
 
@@ -258,7 +268,7 @@ def train(args):
 
     # TRAINER CONFIGURATION
     # Set up a trainer
-    if args.freeze_encoder:
+    if args.freeze_encoder > 0:
         optimizer = {"main": optimizer, "decoder": decoder_optimizer}
 
     trainer = CustomTrainer(
