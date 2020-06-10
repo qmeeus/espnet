@@ -1,7 +1,8 @@
 # minibatch related
-batch-size: 20 
+batch-size: 16 
+accum-grad: 2
 maxlen-in: 800  # if input length  > maxlen_in, batchsize is automatically reduced
-maxlen-out: 75 # if output length > maxlen_out, batchsize is automatically reduced
+maxlen-out: 30 # if output length > maxlen_out, batchsize is automatically reduced
 # optimization related
 sortagrad: -1 # Feed samples from shortest to longest ; -1: enabled for all epochs, 0: disabled, other: enabled for 'other' epochs
 opt: adadelta
@@ -15,19 +16,19 @@ sampling-probability: 0.
 # encoder related
 etype: vggblstm     # encoder architecture type
 elayers: 4
-eunits: 512
-eprojs: 512
+eunits: 784
+eprojs: 784
 subsample: "1_1_1_1_1" # skip every n frame from input to nth layers
 encoder-dropout: .1
 
 # decoder related
 dlayers: 2
-dunits: 512
+dunits: 784
 decoder-dropout: .1
 
 # attention related
 atype: location
-adim: 512
+adim: 784
 aconv-chans: 10
 aconv-filts: 100
 
