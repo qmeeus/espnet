@@ -15,6 +15,8 @@ sns.set_style("whitegrid")
 plt.rcParams["figure.figsize"] = (16,7)
 pd.set_option("display.float_format", "{:.4f}".format)
 
+
+
 # class ModelLogs:
 
 #     def __init__(self, logdir):
@@ -166,97 +168,8 @@ class ModelSummary:
         self.evaluation_summary()
 
 
-def load_logs(*model_logs, parse_model=None):
-    n_models = len(model_logs)
-    logs = pd.DataFrame()
-    for logfile in model_logs:
-        logfile = Path(logfile)
-        log = pd.read_json(logfile)
-        log["model_id"] = logfile.parents[2]
-        logs = pd.concat([logs, log], axis=0)
-        
-    if parse_model is not None:
-        logs = (
-            pd.concat([logs, logs["model_id"].map(str).str.extract(parse_model)], axis=1)
-        )
 
-    return logs
-
-def plot_comparison(results, groups, criterion="validation/main/loss", ascending=False, nbests=0):
-
-    graph_keys = {
-        "Loss": ["main/loss", "validation/main/loss"],
-        "Attention loss": ["main/loss_att", "validation/main/loss_att"],
-        "CTC loss": ["main/loss_ctc", "validation/main/loss_ctc"],
-        "Accuracy": ["main/accuracy", "validation/main/accuracy"],
-        "CER": ["main/cer_ctc", "validation/main/cer_ctc"],
-        "Time": ["epoch", "elapsed_time"],
-    }
-    
-    best_models = (
-        results.sort_values(criterion, ascending=ascending)
-        .groupby("model_id").head(1)
-        .sort_values(criterion, ascending=ascending)
-        .pipe(lambda df: df.head(nbests) if nbests else df)
-        .set_index(groups)
-        .drop([
-            "model_id", "eps", "main/wer", "main/cer", "validation/main/wer", 
-            "validation/main/cer", "iteration"], axis=1)
-        .droplevel([0,1])
-#         .assign(elapsed_time=lambda df: df.elapsed_time / 100)
-    )
-    
-    fig, axs = plt.subplots(3, 2, figsize=(18,12), sharex=True)
-
-    for i, (title, keys) in enumerate(graph_keys.items()):
-        ax = axs[i%3, i//3]
-        ax = best_models[keys].plot.bar(ax=ax, legend=False, secondary_y=keys[1] if title=="Time" else None)
-        ax.set_title(title)
-        ax.legend(loc='best')
-
-def plot_training(results, criterion="validation/main/loss", ascending=False, nbests=0):
-
-    graph_keys = {
-        "Loss": ["main/loss", "validation/main/loss"],
-        "Attention loss": ["main/loss_att", "validation/main/loss_att"],
-        "CTC loss": ["main/loss_ctc", "validation/main/loss_ctc"],
-        "Accuracy": ["main/accuracy", "validation/main/accuracy"],
-        "CER": ["main/cer_ctc", "validation/main/cer_ctc"],
-    }
-    
-    epoch_results = (
-        results.assign(model_id=lambda df: df.model_id.map(lambda p: p.name))
-        .groupby(["model_id", "epoch"]).mean()
-        .drop(["eps", "elapsed_time", "main/wer", "main/cer", 
-               "validation/main/wer", "validation/main/cer", "iteration"], axis=1)
-    )
-
-    if nbests > 0:
-        model_ids = (epoch_results.sort_values(criterion, ascending=ascending)
-                     .groupby(level=0).head(1).head(nbests).droplevel(1).index)
-    else:
-        model_ids = epoch_results.index.levels[0].unique()
-    
-    palette = sns.color_palette(n_colors=len(model_ids))
-
-    fig, axs = plt.subplots(3, 2, figsize=(18,18), sharex=True)
-
-    for i, (title, keys) in enumerate(graph_keys.items()):
-        ax = axs[i%3, i//3]
-
-        for i, model_id in enumerate(model_ids):
-            (epoch_results.xs(model_id, level=0, axis=0)[keys]
-             .plot(ax=ax, legend=False, color=[palette[i]] * len(keys)))
-
-        ax.set_title(title)
-
-    handles, _ = ax.get_legend_handles_labels()
-    ncol = min(1, len(model_ids) // 3)
-    ax.legend(handles[::2], model_ids, bbox_to_anchor=(.7 + ncol / 10, -.4), ncol=ncol)
-    axs[-1,-1].remove()
-
-
-def get_evaluation_results(model_dir, training_sets=["o", "ok", "mono", "all"], test_sets=list("abfghijklmno")):
+def load_evaluation_results(model_dir, training_sets=["o", "ok", "mono", "all"], test_sets=list("abfghijklmno")):
     results_json = "{model_dir}/train/{train}/evaluate/results.{test}.json"
     results = pd.DataFrame() 
     for train_set in training_sets: 
