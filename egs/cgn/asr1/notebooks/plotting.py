@@ -3,12 +3,13 @@ import seaborn as sns
 import pandas as pd
 import numpy as np
 import torch
+import torchaudio
 import re
 from pprint import pprint, pformat
 from pathlib import Path
 from IPython.display import Audio
 
-from data import load_evaluation_results
+from data import load_evaluation_results, annotations, cgn_root
 
 
 sns.set_style("whitegrid")
@@ -24,7 +25,8 @@ __all__ = [
     "plot_attention",
     "plot_attention_predictions",
     "plot_attention_grid",
-    "plot_attention_w2v_vs_ctc"
+    "plot_attention_w2v_vs_ctc",
+    "display_audio"
 ]
 
 
@@ -182,6 +184,15 @@ def plot_attention_w2v_vs_ctc(pretrained_model, decoder_model, test_splits=None,
     plot_attention_predictions(attention_weights[:len(sample.groundtruth.split()), :], sample)
     display(Audio(torch.load(Path(f"~/spchdisk/data/cgn2/{uttid}.pt").expanduser()), rate=16000))
     return attention_weights, sample, dec_results
+    
+    
+def display_audio(uttids, sample_rate=16000):
+    for uttid, row in annotations[annotations.index.isin(uttids)].iterrows():
+        start, end = (int(t * 16000) for t in (row.start, row.end))
+        waveform, _ = torchaudio.load(Path("/users/spraak/spchdata/cgn", row.audio))
+        print("{uttid} ({comp}): {text}".format(uttid=uttid, **row))
+        waveform = waveform[0, start:end].detach().clone()
+        display(Audio(waveform, rate=16000))
     
     
 print(f"Imported objects: {pformat(__all__)}")

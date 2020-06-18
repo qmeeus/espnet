@@ -1,4 +1,5 @@
 import re
+import os
 import json
 import pandas as pd
 import numpy as np
@@ -7,6 +8,7 @@ from IPython.display import display
 from pprint import pformat
 
 pd.set_option("display.float_format", "{:.4f}".format)
+
 
 __all__ = [
     "re",
@@ -22,6 +24,8 @@ __all__ = [
     "option_names",
     "all_options",
     "available_models",
+    "annotations",
+    "load_annotations",
     "update_logfile_register",
     "parse_filenames",
     "load_logs",
@@ -32,7 +36,7 @@ __all__ = [
 
 ]
 
-
+cgn_root = "/users/spraak/spchdata/cgn"
 logfile_register = "../exp/logfiles.txt"
 datasets = ["o", "ok", "mono", "all", "shuffle"]
 criterion, ascending = "validation/main/cer_ctc", True
@@ -44,6 +48,22 @@ option_names = [
 all_options = [*option_names, "path", "exp_name", "model_name", "task", "logfile", "eval_dir"]
 
 
+# Find out if faster
+# def update_logfile_resister():
+#     os.system(f"find ../exp -type f -name log -regex "^\.\.\/exp\/train_.*" > {logfile_register}")
+
+
+def load_annotations():
+    return (
+        pd.read_csv("../data/CGN_ALL/annotations.csv", index_col="uttid", usecols=[
+            "uttid", "comp", "lang", "speaker", "name", "start", "end", "duration", "length", "text"
+        ]).join(
+            pd.read_csv("../data/datafiles.csv", index_col="name", usecols=["name", "audio"]), 
+            on="name"
+        )
+    )
+
+
 def update_logfile_register():
     logfiles = np.array(list(map(str, Path("../exp").glob("train_*/**/results/log"))))
     np.savetxt(logfile_register, logfiles, fmt="%s")
@@ -53,7 +73,7 @@ def parse_filenames(update=False):
     
     models = pd.read_csv(logfile_register, names=["logfile"], squeeze=True).map(Path)
         
-    def create_rgx(is_lstm=True):
+    def create_rgx():
 
         # ../exp/train_unigram_1000_mono/lstmp_6_1_1024_a.1_do.1.1_wd5/train
         # ../exp/train_unigram_1000_mono/lstmp_6_1_1024_att_do.05.05_wd5/train
@@ -62,7 +82,6 @@ def parse_filenames(update=False):
         # ../exp/train_unigram_1000_mono/lstmp_6_1_1024_a.1_do.1.1/train
         # ../exp/train_unigram_1000_ok/transformer_12_6_2048_256_4_a.3_do.1/train
         
-        model_config = "\d+" if is_lstm else "\d+_\d+_\d+"
         return re.compile(
             r"(?P<path>\.\.\/exp\/(?P<exp_name>train_(?P<target>\w+)_(?P<dataset>[a-z]+))\/"
             r"(?P<model_name>(?P<model_type>[a-z]+)_(?P<elayers>\d+)_(?P<dlayers>\d+)_"
@@ -71,7 +90,7 @@ def parse_filenames(update=False):
             r"(?:_do(?P<dropout_enc>\.\d+)(?:(?P<dropout_dec>\.\d+))?)?(?:_wd(?P<weight_decay>\d+))?(?:\w+)?)\/"
             r"(?P<task>[\w-]+))"
         )
-    
+
     models = pd.DataFrame(index=models.index, columns=all_options).assign(logfile=models)
     models.update(models["logfile"].map(str).str.extract(create_rgx()))
 
@@ -105,10 +124,10 @@ def parse_filenames(update=False):
             [0, "units", 1, 0, 0, 0, 0, 0]
         )}
     }
-    
+        
     models.update(
         models.loc[models["dataset"] == "curriculum", "logfile"]
-        .map(lambda s: s.split("/")[-3])
+        .map(lambda s: str(s).split("/")[-3])
         .rename("dataset")
     )
     
@@ -175,6 +194,12 @@ def load_evaluation_results(model_dir, test_sets=list("abfghijklmno"), verbose=F
             for test_set in test_sets
         ]), axis=0)
 
+    if type(model_dir) is list:
+        return pd.concat([
+            load_evaluation_results(model, test_sets, verbose).assign(model_name=model.name)
+            for model in model_dir
+        ], axis=0)
+    
     if "curriculum" in str(model_dir):
         raise NotImplementedError
 
@@ -205,13 +230,15 @@ def eval_result_summary_by_length(eval_results, q=10):
 
 
 # print("Loading all available models...")
-if not Path(logfile_register).exists():
+if not Path(logfile_register).exists() or Path("./update_register").exists():
     update_logfile_register()
     
 available_models = parse_filenames()
 # print(f"{len(available_models)} models loaded:")
 # display(available_models.groupby(["exp_name"]).agg({"model_name": "count"}).sort_values("model_name", ascending=False))
 # display(available_models.apply(pd.Series.nunique, axis=0).sort_values(ascending=False).rename("count").to_frame())
+
+annotations = load_annotations()
 
 print(f"Imported objects: {pformat(__all__)}")
 # print("Available functions: parse_filenames load_logs filter_dataframe load_evaluation_results get_n_bests eval_result_summary_by_length")
