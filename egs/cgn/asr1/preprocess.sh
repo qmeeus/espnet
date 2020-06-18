@@ -1,4 +1,4 @@
-#!/bin/bash -ex
+#!/bin/bash -e
 
 . setup.sh
 . path.sh
@@ -6,6 +6,7 @@
 . settings.sh
 . utils/parse_options.sh
 
+set -x
 set -u
 set -o pipefail
 
@@ -16,7 +17,7 @@ data_dir=data/CGN_ALL
 # =======================================================================================
 if [ $stage -le 0  ]; then
   echo "stage 0: prepare the data"
-  python local/RAW_extract_annot_from_corex.py
+  python local/RAW_extract_annot_from_corex.py --drop-unknown --drop-overlapping
   python local/RAW_prepare_cgn_annot.py \
     --annot-file ${data_dir}/annotations.csv \
     --file-list data/datafiles.csv \
@@ -37,7 +38,8 @@ if [ ${stage} -le 1  ]; then
   echo "stage 1: Feature Generation"
   fbankdir=fbank
   # Generate the fbank features; by default 80-dimensional fbanks with pitch on each frame
-  steps/make_fbank_pitch.sh --cmd "$train_cmd" --nj 8 --write_utt2num_frames true ${data_dir} exp/make_fbank/CGN_ALL ${fbankdir}
+  steps/make_fbank_pitch.sh --cmd "$train_cmd" --nj 8 --write_utt2num_frames true \
+    ${data_dir} exp/make_fbank/CGN_ALL ${fbankdir}
 fi
 
 if [ ${stop_stage} -le 1  ]; then
@@ -69,12 +71,12 @@ fi
 # =======================================================================================
 #                                    WORDPIECES
 # =======================================================================================
-if [ $stage -le 4  ]; then
+if [ $stage -le 3 ]; then
 
-  echo "Stage 4: Train wordpiece model"
+  echo "Stage 3: Train wordpiece model"
   model=unigram
   vocab_size=${vocab_size:-5000}
-  lang_dir=data/lang_${model}_${vocab_size}
+  lang_dir=data/lang_${model}
   texts=$lang_dir/input.txt
   model_prefix=${lang_dir}/${train_set}_${model}_${vocab_size}
   vocab=${model_prefix}_units.txt
@@ -84,6 +86,7 @@ if [ $stage -le 4  ]; then
 
   spm_train \
     --input=$texts \
+    --user_defined_symbols=0,1,2,3,4,5,6,7,8,9 \
     --vocab_size=$vocab_size \
     --model_type=${model} \
     --model_prefix=${model_prefix} \
@@ -104,15 +107,15 @@ if [ $stage -le 4  ]; then
       > ${feature_dir}/data_${model}_${vocab_size}.json
   done
 
-  python local/RAW_split_dataset_components.py data_${model}_${vocab_size}
-  python local/RAW_split_dataset_components.py data_${model}_${vocab_size} \
+  python local/RAW_split_datasets_components.py data_${model}_${vocab_size}
+  python local/RAW_split_datasets_components.py data_${model}_${vocab_size} \
     --groups a b f g h i j k l m n o \
     --group-names a b f g h i j k l m n o \
     --subsets test
 
 fi
 
-if [ ${stop_stage} -le 4  ]; then
+if [ ${stop_stage} -le 3 ]; then
   echo "Reached stop stage, quitting..."
   exit 0
 fi

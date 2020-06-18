@@ -41,7 +41,7 @@ tensorboard_dir=
 target="wordpiece"
 dataset_tag=
 validset_tag=
-curriculum="o ok mono all"
+curriculum="ok mono all"
 
 # data
 cgn_root=/users/spraak/spchdata/cgn

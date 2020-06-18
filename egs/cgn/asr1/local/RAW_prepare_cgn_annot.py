@@ -57,47 +57,48 @@ def load_speakers():
     return pd.read_csv(SPKR_META, sep="\t")
 
 
-def generate_annotations(row):
-    comp, lang, name = (row[key] for key in ("comp", "lang", "name"))
-    partial_path = Path(comp, lang)
-    ort = Path(ORT, partial_path, name + ".skp.gz")
-    tag = Path(TAG, partial_path, name + ".tag.gz")
-
-    if not all(f.exists() for f in (ort, tag)):
-        return
-
-    with gzip.open(ort) as ortfile, gzip.open(tag) as tagfile:
-        ort_soup = BeautifulSoup(ortfile.read(), 'lxml')
-        tag_soup = BeautifulSoup(tagfile.read(), 'lxml')
-        for utt in ort_soup.find_all("tau"):
-            uttid = utt.get("ref")
-            spk = utt.get("s")
-            start = utt.get("tb")
-            end = utt.get("te")
-
-            if MIN_LENGTH_SEC > 0 and float(end) - float(start) < MIN_LENGTH_SEC:
-                continue
-
-            words = [w.get("w").lower() for w in utt.find_all("tw")]
-            pos = [w.get("pos") for w in tag_soup.find("pau", {"ref": uttid}).find_all("pw")]
-
-            if MIN_WORDS > 0 and len(words) < MIN_WORDS:
-                continue
-
-            yield {
-                "comp": comp,
-                "lang": lang,
-                "name": name,
-                "uttid": f"{spk}-{uttid}",
-                "speaker": spk,
-                "start": start,
-                "end": end,
-                "text": " ".join(words),
-                "pos": " ".join(pos)
-            }
-
-
 def extract_annot(df):
+
+    raise ValueError("Deprecated. Use RAW_extract_annot_from_corex.py")
+
+    def generate_annotations(row):
+        comp, lang, name = (row[key] for key in ("comp", "lang", "name"))
+        partial_path = Path(comp, lang)
+        ort = Path(ORT, partial_path, name + ".skp.gz")
+        tag = Path(TAG, partial_path, name + ".tag.gz")
+
+        if not all(f.exists() for f in (ort, tag)):
+            return
+
+        with gzip.open(ort) as ortfile, gzip.open(tag) as tagfile:
+            ort_soup = BeautifulSoup(ortfile.read(), 'lxml')
+            tag_soup = BeautifulSoup(tagfile.read(), 'lxml')
+            for utt in ort_soup.find_all("tau"):
+                uttid = utt.get("ref")
+                spk = utt.get("s")
+                start = utt.get("tb")
+                end = utt.get("te")
+
+                if MIN_LENGTH_SEC > 0 and float(end) - float(start) < MIN_LENGTH_SEC:
+                    continue
+
+                words = [w.get("w").lower() for w in utt.find_all("tw")]
+                pos = [w.get("pos") for w in tag_soup.find("pau", {"ref": uttid}).find_all("pw")]
+
+                if MIN_WORDS > 0 and len(words) < MIN_WORDS:
+                    continue
+
+                yield {
+                    "comp": comp,
+                    "lang": lang,
+                    "name": name,
+                    "uttid": f"{spk}-{uttid}",
+                    "speaker": spk,
+                    "start": start,
+                    "end": end,
+                    "text": " ".join(words),
+                    "pos": " ".join(pos)
+                }
 
     def _extract(row):
         return list(generate_annotations(row))
@@ -184,6 +185,7 @@ def create_utt2dur(annotations):
     utt2dur["duration"] = utt2dur["duration"].map("{:.3f}".format)
     write(utt2dur, "utt2dur")
 
+
 def create_segments(annotations):
     segments = annotations[["uttid", "name", "start", "end"]].copy()
     segments.update(segments[["start", "end"]].applymap("{:.3f}".format))
@@ -207,7 +209,6 @@ def parse_args():
     parser.add_argument("--use-existing-annot", action="store_true")
     parser.add_argument("--use-existing-file-registry", action="store_true")
     return parser.parse_args()
-
 
 
 if __name__ == '__main__':
@@ -238,39 +239,11 @@ if __name__ == '__main__':
     for func in (create_utt2spk, create_spk2utt, create_utt2dur, create_segments, create_text):
         func(annotations)
 
-"""
-def get_opts():
-    parser = argparse.ArgumentParser()
+    backup_dir = options.output_dir / ".backup"
+    os.makedirs(backup_dir, exist_ok=True)
+    for filename in ["utt2dur", "utt2num_frames", "feats.scp"]:
+        fullpath = options.output_dir / filename
+        if fullpath.exists():
+            print(f"Moving {fullpath} to {backup_dir}")
+            os.rename(fullpath, backup_dir / filename)
 
-    parser.add_argument("--cgn",
-                        type=path_type(should_exist=True, resolve=True),
-                        default="~/data/cgn",
-                        help="CGN root")
-
-    parser.add_argument("--filelist",
-                        type=path_type(should_exist=True, resolve=True),
-                        default="~/spchdisk/repos/espnet/egs/cgn/asr1/data/datafiles.csv",
-                        help="CSV file containing the path to the audiofiles relative to CGN root")
-
-    parser.add_argument("--annot-dir",
-                        type=path_type(),
-                        default="CDdata/CGN_V1.0_elda_ann/data",
-                        help="Where to find the annotations, relative to CGN root")
-
-    parser.add_argument("--speaker-metadata",
-                        type=path_type(),
-                        default="meta/text/speakers.txt",
-                        help="File containing the speakers information, relative to annot dir")
-
-    parser.add_argument("--annot-xml-dir",
-                        type=path_type(),
-                        default="annot/xml",
-                        help="Folder where to find xml files with annotations, relative to annot dir")
-
-    parser.add_argument("--output-dir",
-                        type=path_type(resolve=True),
-                        default="~/spchdisk/repos/espnet/egs/cgn/asr1/data/CGN_ALL",
-                        help="Where to store the dataset")
-
-    parser.add_argument("--lang", args="+", )
-"""

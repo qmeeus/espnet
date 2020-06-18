@@ -23,7 +23,7 @@ def main():
     for subset in options.subsets:
         subset_dir = Path(f"dump/CGN_{subset}/deltafalse")
         global_json = subset_dir / f"{options.json_prefix}.json"
-        with open(global_json) as f:
+        with open(global_json, encoding='utf-8') as f:
             dataset = json.load(f)["utts"]
 
         for group_name, group in zip(options.group_names, options.groups):
