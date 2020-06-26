@@ -9,7 +9,7 @@
 import torch
 
 
-def add_sos_eos(ys_pad, sos, eos, ignore_id):
+def add_sos_eos(ys_pad, sos, eos, ignore_id, ys_out_padding=None):
     """Add <sos> and <eos> labels.
 
     :param torch.Tensor ys_pad: batch of padded target sequences (B, Lmax)
@@ -21,10 +21,11 @@ def add_sos_eos(ys_pad, sos, eos, ignore_id):
     :return: padded tensor (B, Lmax)
     :rtype: torch.Tensor
     """
+    ys_out_padding = ys_out_padding or ignore_id
     from espnet.nets.pytorch_backend.nets_utils import pad_list
     _sos = ys_pad.new([sos])
     _eos = ys_pad.new([eos])
     ys = [y[y != ignore_id] for y in ys_pad]  # parse padded ys
     ys_in = [torch.cat([_sos, y], dim=0) for y in ys]
     ys_out = [torch.cat([y, _eos], dim=0) for y in ys]
-    return pad_list(ys_in, eos), pad_list(ys_out, ignore_id)
+    return pad_list(ys_in, eos), pad_list(ys_out, ys_out_padding)

@@ -216,12 +216,17 @@ def recog(options):
             y, ylens = batch["target1"], batch["target1_length"]
             uttids = batch["uttid"]
 
-            preds, attn, output = model.evaluate(X, Xlens, y, ylens)
+            preds, attn, output = model.predict(X, Xlens, y, ylens)
             all_outputs.update(dict(zip(uttids, [dict(zip(output, t)) for t in zip(*output.values())])))
 
             for array, name in [(uttids, "uttids"), (preds, "preds"), (attn, "attn_ws")]:
-                np.save(f"{dump_dir}/{name}.{i:04}.npy", np.array(array))
-                
+                if type(array) == np.ndarray:
+                    np.save(f"{dump_dir}/{name}.{i:04}.npy", array)
+                elif type(array) == dict:
+                    for array_name, array_ in array.items():
+                        np.save(f"{dump_dir}/{name}.{array_name}.{i:04}.npy", np.array(array_))
+                else:
+                    raise NotImplementedError(type(array))
 
     class Serializer(json.JSONEncoder):
         def default(self, obj):
@@ -230,7 +235,6 @@ def recog(options):
             elif isinstance(obj, np.float32):
                 return float(obj)
             return json.JSONEncoder.default(self, obj)
-
 
     with open(f"{options.outdir}/results.json", "w") as f:
         json.dump({"results": all_outputs}, f, indent=4, sort_keys=True, cls=Serializer)

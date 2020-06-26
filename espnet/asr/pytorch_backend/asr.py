@@ -309,7 +309,8 @@ def recog(args):
         mode='asr', load_output=False, sort_in_input_length=False,
         preprocess_conf=train_args.preprocess_conf
         if args.preprocess_conf is None else args.preprocess_conf,
-        preprocess_args={'train': False})
+        preprocess_args={'train': False}
+    )
 
     if args.batchsize == 0:
         with torch.no_grad():

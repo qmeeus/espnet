@@ -200,6 +200,7 @@ class Decoder(nn.Module):
 
         # predictions, _ = self.forward(hs_pad, hlens, prev_output_tokens)
 
+        # TODO: replace with MaskedMSELoss from espnet.nets.pytorch_backend.losses
         item_losses = F.mse_loss(target_emb, predictions, reduction="none").mean(-1)
         seq_losses = (item_losses.masked_fill_(target_mask, 0).sum(-1) / ylens)
         loss = getattr(seq_losses, reduction)() if reduction in ("sum", "mean") else seq_losses
@@ -221,6 +222,9 @@ class Decoder(nn.Module):
         return target_pad, target_mask
         
     def tokens_to_string(self, tokens):
+        tokens = list(tokens)
+        if self.eos in tokens:
+            tokens = tokens[:tokens.index(self.eos)]
         return " ".join(self.char_list[token] for token in tokens if token != self.pad)
 
     def _sample_from_previous_output(self, prediction):

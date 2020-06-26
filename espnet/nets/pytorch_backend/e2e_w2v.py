@@ -204,7 +204,6 @@ class E2E(torch.nn.Module):
         # 1. Encoder
         hs_pad, hlens, _ = self.encoder(hs_pad, hlens)
         logging.debug(f"Enc out: {hs_pad.size()}")
-
         # 2. Decoder
         ys = [y[y != self.decoder.ignore_id] for y in ys_pad]  # parse padded ys
         ylens = torch.tensor(list(map(len, ys))).type_as(hlens)
@@ -231,7 +230,7 @@ class E2E(torch.nn.Module):
 
         return losses
 
-    def evaluate(self, xs_pad, ilens, ys_pad, ylens):
+    def predict(self, xs_pad, ilens, ys_pad, ylens):
 
         from sklearn.neighbors import KNeighborsClassifier
 

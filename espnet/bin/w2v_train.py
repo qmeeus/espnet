@@ -12,6 +12,7 @@ import random
 import subprocess
 import sys
 import re
+from pathlib import Path
 
 import configargparse
 import numpy as np
@@ -91,12 +92,12 @@ CONFIG = {
         help="Input length ratio to obtain max output length.\n"
         "If maxlenratio=0.0 (default), it uses a end-detect function to automatically find maximum hypothesis lengths"),
     "minlenratio": dict(default=0.0, type=float, help='Input length ratio to obtain min output length'),
-    "ctc-weight": dict(default=0.3, type=float, help='CTC weight in joint decoding'),
-    "rnnlm": dict(type=str, default=None, help='RNNLM model file to read'),
-    "rnnlm-conf": dict(type=str, default=None, help='RNNLM model config file to read'),
-    "lm-weight": dict(default=0.1, type=float, help='RNNLM weight.'),
-    "sym-space": dict(default='<space>', type=str, help='Space symbol'),
-    "sym-blank": dict(default='<blank>', type=str, help='Blank symbol'),
+    # "ctc-weight": dict(default=0.3, type=float, help='CTC weight in joint decoding'),
+    # "rnnlm": dict(type=str, default=None, help='RNNLM model file to read'),
+    # "rnnlm-conf": dict(type=str, default=None, help='RNNLM model config file to read'),
+    # "lm-weight": dict(default=0.1, type=float, help='RNNLM weight.'),
+    # "sym-space": dict(default='<space>', type=str, help='Space symbol'),
+    # "sym-blank": dict(default='<blank>', type=str, help='Blank symbol'),
 
     # Batches
     "sortagrad": dict(default=0, type=int, nargs='?', help="How many epochs to use sortagrad for. 0 = deactivated, -1 = all epochs"),
@@ -168,29 +169,29 @@ CONFIG = {
     "use-dnn-mask-for-wpe": dict(type=strtobool, default=False, help='Use DNN to estimate the power spectrogram. This option is experimental.'),
 
     # Beamformer
-    "use-beamformer": dict(type=strtobool, default=True, help=''),
-    "btype": dict(
-        default='blstmp', type=str, choices=AVAILABLE_E2E_RNNS,
-        help='Type of encoder network architecture of the mask estimator for Beamformer.'),
-    "blayers": dict(type=int, default=2, help=''),
-    "bunits": dict(type=int, default=300, help=''),
-    "bprojs": dict(type=int, default=300, help=''),
-    "badim": dict(type=int, default=320, help=''),
-    "bnmask": dict(type=int, default=2, help='Number of beamforming masks, default is 2 for [speech, noise].'),
-    "ref-channel": dict(type=int, default=-1, help='The reference channel used for beamformer. By default, the channel is estimated by DNN.'),
-    "bdropout-rate": dict(type=float, default=0.0, help=''),
+    # "use-beamformer": dict(type=strtobool, default=True, help=''),
+    # "btype": dict(
+    #     default='blstmp', type=str, choices=AVAILABLE_E2E_RNNS,
+    #     help='Type of encoder network architecture of the mask estimator for Beamformer.'),
+    # "blayers": dict(type=int, default=2, help=''),
+    # "bunits": dict(type=int, default=300, help=''),
+    # "bprojs": dict(type=int, default=300, help=''),
+    # "badim": dict(type=int, default=320, help=''),
+    # "bnmask": dict(type=int, default=2, help='Number of beamforming masks, default is 2 for [speech, noise].'),
+    # "ref-channel": dict(type=int, default=-1, help='The reference channel used for beamformer. By default, the channel is estimated by DNN.'),
+    # "bdropout-rate": dict(type=float, default=0.0, help=''),
 
-    # Feature transform: Normalization
-    "stats-file": dict(type=str, default=None, help='The stats file for the feature normalization'),
-    "apply-uttmvn": dict(type=strtobool, default=True, help='Apply utterance level mean variance normalization.'),
-    "uttmvn-norm-means": dict(type=strtobool, default=True, help=''),
-    "uttmvn-norm-vars": dict(type=strtobool, default=False, help=''),
+    # # Feature transform: Normalization
+    # "stats-file": dict(type=str, default=None, help='The stats file for the feature normalization'),
+    # "apply-uttmvn": dict(type=strtobool, default=True, help='Apply utterance level mean variance normalization.'),
+    # "uttmvn-norm-means": dict(type=strtobool, default=True, help=''),
+    # "uttmvn-norm-vars": dict(type=strtobool, default=False, help=''),
 
-    # Feature transform: Fbank
-    "fbank-fs": dict(type=int, default=16000, help='The sample frequency used for the mel-fbank creation.'),
-    "n-mels": dict(type=int, default=80, help='The number of mel-frequency bins.'),
-    "fbank-fmin": dict(type=float, default=0., help=''),
-    "fbank-fmax": dict(type=float, default=None, help=''),
+    # # Feature transform: Fbank
+    # "fbank-fs": dict(type=int, default=16000, help='The sample frequency used for the mel-fbank creation.'),
+    # "n-mels": dict(type=int, default=80, help='The number of mel-frequency bins.'),
+    # "fbank-fmin": dict(type=float, default=0., help=''),
+    # "fbank-fmax": dict(type=float, default=None, help=''),
 
 }
 def get_parser(parser=None, required=True):
@@ -251,19 +252,12 @@ def main(cmd_args):
     np.random.seed(args.seed)
 
     # load dictionary for debug log
-    if args.dict is not None:
-        with open(args.dict, 'rb') as f:
-            dictionary = f.readlines()
-        char_list = [entry.decode('utf-8').split(' ')[0]
-                     for entry in dictionary]
-        char_list.insert(0, '<blank>')
-        char_list.append('<eos>')
-        args.char_list = char_list
-    else:
-        args.char_list = None
+    assert args.dict is not None and Path(args.dict).exists()
+    with open(args.dict, encoding='utf-8') as f:
+        char_list = ['<blank>', *[entry.split(' ')[0] for entry in f.readlines()], '<eos>']
+    args.char_list = char_list
 
     # train
-
     if not args.v1:
         from espnet.mtl.train import train
 

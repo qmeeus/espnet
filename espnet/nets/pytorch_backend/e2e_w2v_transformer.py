@@ -3,24 +3,23 @@
 
 """Transformer speech recognition model (pytorch)."""
 
+import numpy as np
 from argparse import Namespace
 from distutils.util import strtobool
-
+import editdistance
 import logging
 import math
-
 import torch
 
 from espnet.nets.asr_interface import ASRInterface
 from espnet.nets.pytorch_backend.ctc import CTC
 from espnet.nets.pytorch_backend.e2e_asr import CTC_LOSS_THRESHOLD
 from espnet.nets.pytorch_backend.e2e_asr import Reporter
-from espnet.nets.pytorch_backend.nets_utils import get_subsample
-from espnet.nets.pytorch_backend.nets_utils import make_non_pad_mask
-from espnet.nets.pytorch_backend.nets_utils import th_accuracy
+from espnet.nets.pytorch_backend.nets_utils import get_subsample, make_non_pad_mask, th_accuracy
+from espnet.nets.pytorch_backend.losses import MaskedMSELoss
 from espnet.nets.pytorch_backend.transformer.add_sos_eos import add_sos_eos
 from espnet.nets.pytorch_backend.transformer.attention import MultiHeadedAttention
-from espnet.nets.pytorch_backend.transformer.decoder import Decoder
+from espnet.nets.pytorch_backend.transformer.decoder_ import Decoder
 from espnet.nets.pytorch_backend.transformer.encoder import Encoder
 from espnet.nets.pytorch_backend.transformer.initializer import initialize
 from espnet.nets.pytorch_backend.transformer.label_smoothing_loss import LabelSmoothingLoss
@@ -28,6 +27,11 @@ from espnet.nets.pytorch_backend.transformer.mask import subsequent_mask
 from espnet.nets.pytorch_backend.transformer.mask import target_mask
 from espnet.nets.pytorch_backend.transformer.plot import PlotAttentionReport
 from espnet.nets.scorers.ctc import CTCPrefixScorer
+from espnet.utils.torch_utils import load_pretrained_embedding_from_file
+
+
+EMB_PATH = "/esat/spchdisk/scratch/qmeeus/repos/espnet/egs/cgn/asr1/data/lang_word/w2v_small.txt"
+EMB_DIM = 100
 
 
 class E2E(ASRInterface, torch.nn.Module):
@@ -39,8 +43,8 @@ class E2E(ASRInterface, torch.nn.Module):
 
     """
 
-    LOSS_NAMES = ["loss", "loss_att", "loss_ctc"]
-    METRIC_NAMES = ["cer_ctc", "accuracy"]
+    LOSS_NAMES = ["loss"]
+    METRIC_NAMES = []
 
     @staticmethod
     def add_arguments(parser):
@@ -106,6 +110,9 @@ class E2E(ASRInterface, torch.nn.Module):
             positional_dropout_rate=args.dropout_rate,
             attention_dropout_rate=args.transformer_attn_dropout_rate
         )
+
+        dec_input = load_pretrained_embedding_from_file(EMB_PATH, args.char_list, freeze=True)
+
         self.decoder = Decoder(
             odim=odim,
             attention_dim=args.adim,
@@ -115,19 +122,22 @@ class E2E(ASRInterface, torch.nn.Module):
             dropout_rate=args.dropout_rate,
             positional_dropout_rate=args.dropout_rate,
             self_attention_dropout_rate=args.transformer_attn_dropout_rate,
-            src_attention_dropout_rate=args.transformer_attn_dropout_rate
+            src_attention_dropout_rate=args.transformer_attn_dropout_rate,
+            input_layer=dec_input,
+            emb_dim=EMB_DIM
         )
-        self.sos = odim - 1
-        self.eos = odim - 1
+
+        self.char_list = args.char_list
+        self.sos = self.eos = self.char_list.index("</s>")
+        self.pad = self.char_list.index("<pad>")
+
         self.odim = odim
         self.ignore_id = ignore_id
         self.subsample = get_subsample(args, mode='asr', arch='transformer')
         self.reporter = Reporter()
 
-        # self.lsm_weight = a
-        self.criterion = torch.nn.MSELoss()
-        # LabelSmoothingLoss(self.odim, self.ignore_id, args.lsm_weight,
-                                            # args.transformer_length_normalized_loss)
+        self.criterion = MaskedMSELoss()
+
         # self.verbose = args.verbose
         self.reset_parameters(args)
         self.adim = args.adim
@@ -140,8 +150,8 @@ class E2E(ASRInterface, torch.nn.Module):
     def reset_parameters(self, args):
         """Initialize parameters."""
         # initialize parameters
+        # TODO: apparently, this does not change the weights of the embeddings
         initialize(self, args.transformer_init)
-        # TODO: initialise embeddings from file here and freeze weights
 
     def forward(self, xs_pad, ilens, ys_pad, calc_metrics=False, compat_on=True):
         """E2E forward.
@@ -167,13 +177,14 @@ class E2E(ASRInterface, torch.nn.Module):
         hlens = hs_mask.sum(-1)
 
         # 2. forward decoder
-        ys_in_pad, ys_out_pad = add_sos_eos(ys_pad, self.sos, self.eos, self.ignore_id)
+        ys_in_pad, ys_out_pad = add_sos_eos(ys_pad, self.sos, self.eos, self.ignore_id, ys_out_padding=self.pad)
         ys_mask = target_mask(ys_in_pad, self.ignore_id)
         pred_pad, pred_mask = self.decoder(ys_in_pad, ys_mask, hs_pad, hs_mask)
         self.pred_pad = pred_pad
 
         # 3. compute attention loss
-        loss_att = self.criterion(pred_pad, ys_out_pad)
+        ys_out_emb = self.decoder.embed[0](ys_out_pad)
+        loss_att = self.criterion(pred_pad, ys_out_emb, (ys_pad != self.ignore_id).sum(-1) + 1)
         losses = {"loss": loss_att}
 
         # 3. Metrics HACK
@@ -192,6 +203,66 @@ class E2E(ASRInterface, torch.nn.Module):
             return output["loss"]
 
         return losses
+
+    def predict(self, xs_pad, ilens, ys_pad, ylens):
+
+        from sklearn.neighbors import KNeighborsClassifier
+
+        nneighbors = KNeighborsClassifier(n_neighbors=1, n_jobs=-1).fit(
+            self.decoder.embed[0].weight.cpu(), np.arange(len(self.char_list))
+        )
+
+        loss_fn = MaskedMSELoss(reduction='none')
+
+        self.eval()
+        with torch.no_grad():
+
+            output = {}
+
+            # Encoder
+            src_mask = make_non_pad_mask(ilens.tolist()).to(xs_pad.device).unsqueeze(-2)
+            hs_pad, hs_mask = self.encoder(xs_pad, src_mask)
+            hlens = hs_mask.sum(-1)
+
+            # Decoder
+            ys_in_pad, ys_out_pad = add_sos_eos(ys_pad, self.sos, self.eos, self.ignore_id, ys_out_padding=self.pad)
+            ys_mask = target_mask(ys_in_pad, self.ignore_id)
+            pred_pad, pred_mask = self.decoder(ys_in_pad, ys_mask, hs_pad, hs_mask)
+            pred_lens = pred_mask.sum(-1)
+
+            # Attention
+            attention_weights = {}
+            for name, module in self.named_modules():
+                if isinstance(module, MultiHeadedAttention):
+                    attention_weights[name] = module.attn.cpu().numpy()
+
+            # Loss
+            ys_out_emb = self.decoder.embed[0](ys_out_pad)
+            loss = loss_fn(pred_pad, ys_out_emb, (ys_pad != self.ignore_id).sum(-1) + 1)
+            pred_pad = pred_pad.detach().cpu().numpy()
+            output["loss"] = loss.detach().cpu().numpy()
+            
+            # Decoding with 1NN
+            token2str = self.tokens_to_string
+            target_sentences = list(map(token2str, [y[y != self.ignore_id] for y in ys_pad]))
+            bs, olen, size = pred_pad.shape
+            predicted_tokens = nneighbors.predict(pred_pad.reshape(bs * olen, size)).reshape(bs, olen)
+            predicted_sentences = list(map(token2str, predicted_tokens))
+            output["prediction_str"] = predicted_sentences
+            output["accuracy"], output["wer"] = [], []
+            for target_sentence, predicted_sentence in zip(target_sentences, predicted_sentences):
+                logging.info(f"Target: {target_sentence}")
+                logging.info(f"Prediction: {predicted_sentence}")
+                words_true, words_pred = (sent.split() for sent in (target_sentence, predicted_sentence))
+
+                output["accuracy"].append(
+                    np.mean([word_true == word_pred 
+                    for word_true, word_pred in zip(words_true, words_pred)])
+                )
+
+                output["wer"].append(editdistance.eval(words_true, words_pred) / len(words_true))
+
+            return pred_pad, attention_weights, output
 
     def log_metrics(self, metrics):
         # FIXME: HACKY for compatibility with self.reporter
@@ -221,3 +292,9 @@ class E2E(ASRInterface, torch.nn.Module):
             if isinstance(m, MultiHeadedAttention):
                 ret[name] = m.attn.cpu().numpy()
         return ret
+
+    def tokens_to_string(self, tokens):
+        tokens = list(tokens)
+        if self.eos in tokens:
+            tokens = tokens[:tokens.index(self.eos)]
+        return " ".join(self.char_list[token] for token in tokens if token != self.pad)
