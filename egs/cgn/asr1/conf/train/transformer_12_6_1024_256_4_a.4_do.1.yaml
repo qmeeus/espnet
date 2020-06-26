@@ -1,16 +1,16 @@
 # network architecture
 # encoder related
 elayers: 12
-eunits: 2048
+eunits: 1024
 # decoder related
 dlayers: 6
-dunits: 2048
+dunits: 1024
 # attention related
-adim: 512 
-aheads: 8
+adim: 256
+aheads: 4
 
 # hybrid CTC/attention
-mtlalpha: 0.4
+mtlalpha: 0.3
 
 # minibatch related
 batch-size: 32 

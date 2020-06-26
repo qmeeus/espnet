@@ -6,11 +6,14 @@ eunits: 2048
 dlayers: 6
 dunits: 2048
 # attention related
-adim: 512 
-aheads: 8
+adim: 256
+aheads: 4
 
 # hybrid CTC/attention
-mtlalpha: 0.4
+mtlalpha: 0.3
+
+# label smoothing
+lsm-weight: 0.1
 
 # minibatch related
 batch-size: 32 
@@ -36,6 +39,6 @@ transformer-attn-dropout-rate: 0.0
 transformer-length-normalized-loss: false
 transformer-init: pytorch
 
-report-cer: false
-report-wer: false 
+report-cer: true
+report-wer: true
 

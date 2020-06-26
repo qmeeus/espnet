@@ -12,9 +12,6 @@ aheads: 4
 # hybrid CTC/attention
 mtlalpha: 0.3
 
-# label smoothing
-lsm-weight: 0.1
-
 # minibatch related
 batch-size: 32 
 maxlen-in: 512  # if input length  > maxlen-in, batchsize is automatically reduced
@@ -31,7 +28,7 @@ dropout-rate: 0.1
 
 # transformer specific setting
 backend: pytorch
-model-class: "espnet.nets.pytorch_backend.e2e_asr_transformer:E2E"
+model-class: "espnet.nets.pytorch_backend.e2e_w2v_transformer:E2E"
 transformer-input-layer: conv2d     # encoder architecture type
 transformer-lr: 10.0
 transformer-warmup-steps: 25000
