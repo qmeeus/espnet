@@ -32,6 +32,7 @@ def parse_args():
                         default="data/lang_word/CGN_train_word_units.txt",
                         help="Where to save the vocabulary file")
 
+    parser.add_argument("--use-existing-vocab", action="store_true")
     parser.add_argument("--embeddings", type=absolute_path,
                         default="~/spchdisk/data/dutchembeddings/CoNLL17/model.txt",
                         help="Path to word vectors.")
@@ -136,7 +137,7 @@ def parse_sentence(sentence, word2token, tokenize=str.split, blacklist=None, unk
 
     if len(tokens) < MIN_OUTPUT_LENGTH:
         DROP_REASON["length"] += 1
-        return  
+        return
 
     return {
         "shape": [len(tokens), len(word2token)],
@@ -210,23 +211,24 @@ if __name__ == '__main__':
         for tag in options.datatags
     ])
 
-    vocab_file = build_vocab(
-        sentences,
-        known_words,
-        options.vocab_file,
-        tokenize=tokenize,
-        eos=options.eos,
-        unk=options.unk,
-        eos_index=options.eos_index,
-        unk_index=options.unk_index
-    )
+    if not options.use_existing_vocab:
+        build_vocab(
+            sentences,
+            known_words,
+            options.vocab_file,
+            tokenize=tokenize,
+            eos=options.eos,
+            unk=options.unk,
+            eos_index=options.eos_index,
+            unk_index=options.unk_index
+        )
 
-    from RAW_prune_word2vec import prune_word2vec
-    special_symbols = {
-        options.eos: (options.eos_index, options.eos_value), 
-        options.pad: (options.pad_index, options.pad_value)
-    }
-    prune_word2vec(options.embeddings, options.vocab_file, sort=True, special_symbols=special_symbols)
+        from RAW_prune_word2vec import prune_word2vec
+        special_symbols = {
+            options.eos: (options.eos_index, options.eos_value),
+            options.pad: (options.pad_index, options.pad_value)
+        }
+        prune_word2vec(options.embeddings, options.vocab_file, sort=True, special_symbols=special_symbols)
 
     word2token = load_vocab(options.vocab_file)
 
