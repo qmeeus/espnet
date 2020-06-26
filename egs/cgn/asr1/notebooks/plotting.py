@@ -26,7 +26,8 @@ __all__ = [
     "plot_attention_predictions",
     "plot_attention_grid",
     "plot_attention_w2v_vs_ctc",
-    "display_audio"
+    "display_audio",
+    "format_dataframe_best_metrics"
 ]
 
 
@@ -193,7 +194,18 @@ def display_audio(uttids, sample_rate=16000):
         print("{uttid} ({comp}): {text}".format(uttid=uttid, **row))
         waveform = waveform[0, start:end].detach().clone()
         display(Audio(waveform, rate=16000))
+
+        
+def format_dataframe_best_metrics(df):
+
+    def highlight_min(data, color='yellow'):
+        assert data.ndim == 2
+        fmt = data.copy().applymap(lambda _: "")
+        return fmt.mask((data.T == data.min(axis=1)).T, f"background-color:{color}")
     
-    
+    fmt = df.copy()
+    return fmt.groupby(level=1, axis=1).apply(highlight_min)
+
+
 print(f"Imported objects: {pformat(__all__)}")
 # print("Available plotting functions: plot_comparison plot_training plot_eval_results_by_length")

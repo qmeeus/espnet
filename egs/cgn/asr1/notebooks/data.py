@@ -86,8 +86,8 @@ def parse_filenames(update=False):
             r"(?P<path>\.\.\/exp\/(?P<exp_name>train_(?P<target>\w+)_(?P<dataset>[a-z]+))\/"
             r"(?P<model_name>(?P<model_type>[a-z]+)_(?P<elayers>\d+)_(?P<dlayers>\d+)_"
             r"(?P<units>\d+)_(?:(?P<adim>\d+)_(?P<ahead>\d+)_)?"
-            r"(?P<alpha>(?:a\.\d+)|(?:ctc)|(?:att))"
-            r"(?:_do(?P<dropout_enc>\.\d+)(?:(?P<dropout_dec>\.\d+))?)?(?:_wd(?P<weight_decay>\d+))?(?:\w+)?)\/"
+            r"(?:(?P<alpha>(?:a\.\d+)|(?:ctc)|(?:att))_)?"
+            r"(?:do(?P<dropout_enc>\.\d+)(?:(?P<dropout_dec>\.\d+))?)?(?:_wd(?P<weight_decay>\d+))?(?:\w+)?)\/"
             r"(?P<task>[\w-]+))"
         )
 
