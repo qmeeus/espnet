@@ -94,8 +94,39 @@ class E2E(ASRInterface, torch.nn.Module):
         :param Namespace args: argument Namespace containing options
         """
         torch.nn.Module.__init__(self)
-            
-        self.encoder = Encoder(
+
+        self.encoder = self.build_encoder(idim, args)
+        self.decoder = self.build_decoder(odim, args)
+
+        self.char_list = args.char_list
+        self.sos = self.eos = self.char_list.index("</s>")
+        self.pad = self.char_list.index("<pad>")
+
+        self.odim = odim
+        self.ignore_id = ignore_id
+        self.subsample = get_subsample(args, mode='asr', arch='transformer')
+        self.reporter = Reporter()
+
+        self.criterion = self.build_criterion(args)
+
+        # self.verbose = args.verbose
+        self.reset_parameters(args)
+        self.adim = args.adim
+        self.mtlalpha = args.mtlalpha
+        self.ctc = self.build_ctc_layer(args)
+        self.report_cer = args.report_cer
+        self.report_wer = args.report_wer
+        self.error_calculator = self.build_error_calculator(args)
+
+        self.rnnlm = None
+
+    def reset_parameters(self, args):
+        """Initialize parameters."""
+        # initialize parameters
+        initialize(self, args.transformer_init)
+
+    def build_encoder(self, idim, args):
+        return Encoder(
             idim=idim,
             attention_dim=args.adim,
             attention_heads=args.aheads,
@@ -106,7 +137,9 @@ class E2E(ASRInterface, torch.nn.Module):
             positional_dropout_rate=args.dropout_rate,
             attention_dropout_rate=args.transformer_attn_dropout_rate
         )
-        self.decoder = Decoder(
+
+    def build_decoder(self, odim, args):
+        return Decoder(
             odim=odim,
             attention_dim=args.adim,
             attention_heads=args.aheads,
@@ -117,38 +150,26 @@ class E2E(ASRInterface, torch.nn.Module):
             self_attention_dropout_rate=args.transformer_attn_dropout_rate,
             src_attention_dropout_rate=args.transformer_attn_dropout_rate
         )
-        self.sos = odim - 1
-        self.eos = odim - 1
-        self.odim = odim
-        self.ignore_id = ignore_id
-        self.subsample = get_subsample(args, mode='asr', arch='transformer')
-        self.reporter = Reporter()
 
-        # self.lsm_weight = a
-        self.criterion = LabelSmoothingLoss(self.odim, self.ignore_id, args.lsm_weight,
-                                            args.transformer_length_normalized_loss)
-        # self.verbose = args.verbose
-        self.reset_parameters(args)
-        self.adim = args.adim
-        self.mtlalpha = args.mtlalpha
-        if args.mtlalpha > 0.0:
-            self.ctc = CTC(odim, args.adim, args.dropout_rate, ctc_type=args.ctc_type, reduce=True)
-        else:
-            self.ctc = None
+    def build_criterion(self, args):
+        return LabelSmoothingLoss(
+            self.odim, self.ignore_id, args.lsm_weight,
+            args.transformer_length_normalized_loss
+        )
 
+    def build_ctc_layer(self, args):
+        if self.mtlalpha > 0.0:
+            return CTC(self.odim, args.adim, args.dropout_rate, ctc_type=args.ctc_type, reduce=True)
+
+    def build_error_calculator(self, args):
         if args.report_cer or args.report_wer:
             from espnet.nets.e2e_asr_common import ErrorCalculator
-            self.error_calculator = ErrorCalculator(args.char_list,
-                                                    args.sym_space, args.sym_blank,
-                                                    args.report_cer, args.report_wer)
-        else:
-            self.error_calculator = None
-        self.rnnlm = None
-
-    def reset_parameters(self, args):
-        """Initialize parameters."""
-        # initialize parameters
-        initialize(self, args.transformer_init)
+            return ErrorCalculator(
+                args.char_list,
+                args.sym_space, 
+                args.sym_blank,
+                args.report_cer, args.report_wer
+            )
 
     def forward(self, xs_pad, ilens, ys_pad):
         """E2E forward.

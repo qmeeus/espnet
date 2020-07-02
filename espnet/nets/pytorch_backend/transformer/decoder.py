@@ -53,26 +53,18 @@ class Decoder(ScorerInterface, torch.nn.Module):
                  concat_after=False):
         """Construct an Decoder object."""
         torch.nn.Module.__init__(self)
-        if input_layer == "embed":
-            self.embed = torch.nn.Sequential(
-                torch.nn.Embedding(odim, attention_dim),
-                pos_enc_class(attention_dim, positional_dropout_rate)
-            )
-        elif input_layer == "linear":
-            self.embed = torch.nn.Sequential(
-                torch.nn.Linear(odim, attention_dim),
-                torch.nn.LayerNorm(attention_dim),
-                torch.nn.Dropout(dropout_rate),
-                torch.nn.ReLU(),
-                pos_enc_class(attention_dim, positional_dropout_rate)
-            )
-        elif isinstance(input_layer, torch.nn.Module):
-            self.embed = torch.nn.Sequential(
-                input_layer,
-                pos_enc_class(attention_dim, positional_dropout_rate)
-            )
-        else:
-            raise NotImplementedError("only `embed` or torch.nn.Module is supported.")
+
+
+        self.output_dim = odim
+        self.attention_dim = attention_dim
+
+        self.embed = self.get_input_layer(
+            input_layer=input_layer, 
+            dropout_rate=dropout_rate, 
+            positional_dropout_rate=positional_dropout_rate, 
+            pos_enc_class=pos_enc_class
+        )
+
         self.normalize_before = normalize_before
         self.decoders = repeat(
             num_blocks,
@@ -93,6 +85,40 @@ class Decoder(ScorerInterface, torch.nn.Module):
         else:
             self.output_layer = None
 
+    def get_input_layer(self, input_layer,
+                        dropout_rate=.1,
+                        positional_dropout_rate=.1, 
+                        pos_enc_class=PositionalEncoding):
+        
+        pos_enc = pos_enc_class(self.attention_dim, positional_dropout_rate)
+
+        if input_layer == "embed":
+            return torch.nn.Sequential(
+                torch.nn.Embedding(self.output_dim, self.attention_dim),
+                pos_enc
+            )
+        
+        elif input_layer == "linear":
+            return torch.nn.Sequential(
+                torch.nn.Linear(self.output_dim, attention_dim),
+                torch.nn.LayerNorm(self.attention_dim),
+                torch.nn.Dropout(dropout_rate),
+                torch.nn.ReLU(),
+                pos_enc
+            )
+        
+        elif isinstance(input_layer, torch.nn.Module):
+            return torch.nn.Sequential(
+                input_layer,
+                pos_enc
+            )
+        
+        elif input_layer is None:
+            return
+        
+        else:
+            raise NotImplementedError("only `embed` or torch.nn.Module is supported.")
+
     def forward(self, tgt, tgt_mask, memory, memory_mask):
         """Forward decoder.
 
@@ -111,7 +137,9 @@ class Decoder(ScorerInterface, torch.nn.Module):
         :return tgt_mask: score mask before softmax (batch, maxlen_out)
         :rtype: torch.Tensor
         """
-        x = self.embed(tgt)
+        if self.embed:
+            x = self.embed(tgt)
+
         x, tgt_mask, memory, memory_mask = self.decoders(x, tgt_mask, memory, memory_mask)
         if self.normalize_before:
             x = self.after_norm(x)

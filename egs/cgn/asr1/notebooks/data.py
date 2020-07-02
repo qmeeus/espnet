@@ -196,7 +196,7 @@ def load_evaluation_results(model_dir, test_sets=list("abfghijklmno"), verbose=F
 
     if type(model_dir) is list:
         return pd.concat([
-            load_evaluation_results(model, test_sets, verbose).assign(model_name=model.name)
+            load_evaluation_results(model, test_sets, verbose).assign(model_name=model)
             for model in model_dir
         ], axis=0)
     
@@ -211,7 +211,7 @@ def load_evaluation_results(model_dir, test_sets=list("abfghijklmno"), verbose=F
 
     for i, (template, orient) in enumerate(zip(templates, ["index", "index", "columns"])):
         try:
-            if verbose: print(template)
+            if verbose: print(template.format(model_dir=model_dir, test="$test"))
             results = _load_evaluation_results(model_dir, test_sets, template, orient)
             return results
         except Exception as err:

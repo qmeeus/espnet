@@ -4,37 +4,26 @@
 """Transformer speech recognition model (pytorch)."""
 
 import numpy as np
-from argparse import Namespace
-from distutils.util import strtobool
 import editdistance
 import logging
 import math
 import torch
 
-from espnet.nets.asr_interface import ASRInterface
-from espnet.nets.pytorch_backend.ctc import CTC
-from espnet.nets.pytorch_backend.e2e_asr import CTC_LOSS_THRESHOLD
-from espnet.nets.pytorch_backend.e2e_asr import Reporter
-from espnet.nets.pytorch_backend.nets_utils import get_subsample, make_non_pad_mask, th_accuracy
+from espnet.nets.pytorch_backend.nets_utils import make_non_pad_mask
 from espnet.nets.pytorch_backend.losses import MaskedMSELoss
 from espnet.nets.pytorch_backend.transformer.add_sos_eos import add_sos_eos
 from espnet.nets.pytorch_backend.transformer.attention import MultiHeadedAttention
-from espnet.nets.pytorch_backend.transformer.decoder_ import Decoder
-from espnet.nets.pytorch_backend.transformer.encoder import Encoder
-from espnet.nets.pytorch_backend.transformer.initializer import initialize
-from espnet.nets.pytorch_backend.transformer.label_smoothing_loss import LabelSmoothingLoss
-from espnet.nets.pytorch_backend.transformer.mask import subsequent_mask
+from espnet.nets.pytorch_backend.transformer.decoder_w2v import Decoder
 from espnet.nets.pytorch_backend.transformer.mask import target_mask
-from espnet.nets.pytorch_backend.transformer.plot import PlotAttentionReport
-from espnet.nets.scorers.ctc import CTCPrefixScorer
 from espnet.utils.torch_utils import load_pretrained_embedding_from_file
+from espnet.nets.pytorch_backend.e2e_asr_transformer import E2E as BaseE2E
 
 
 EMB_PATH = "/esat/spchdisk/scratch/qmeeus/repos/espnet/egs/cgn/asr1/data/lang_word/w2v_small.txt"
 EMB_DIM = 100
 
 
-class E2E(ASRInterface, torch.nn.Module):
+class E2E(BaseE2E):
     """E2E module.
 
     :param int idim: dimension of inputs
@@ -48,47 +37,11 @@ class E2E(ASRInterface, torch.nn.Module):
 
     @staticmethod
     def add_arguments(parser):
-        """Add arguments."""
-        group = parser.add_argument_group("transformer model setting")
-
-        group.add_argument("--transformer-init", type=str, default="pytorch",
-                           choices=["pytorch", "xavier_uniform", "xavier_normal",
-                                    "kaiming_uniform", "kaiming_normal"],
-                           help='how to initialize transformer parameters')
-        group.add_argument("--transformer-input-layer", type=str, default="conv2d",
-                           choices=["conv2d", "linear", "embed"],
-                           help='transformer input layer type')
-        group.add_argument('--transformer-attn-dropout-rate', default=None, type=float,
-                           help='dropout in transformer attention. use --dropout-rate if None is set')
-        group.add_argument('--transformer-lr', default=10.0, type=float,
-                           help='Initial value of learning rate')
-        group.add_argument('--transformer-warmup-steps', default=25000, type=int,
-                           help='optimizer warmup steps')
-        group.add_argument('--transformer-length-normalized-loss', default=True, type=strtobool,
-                           help='normalize loss by length')
-        group.add_argument('--dropout-rate', default=0.0, type=float, help='Dropout rate')
-
-        # Encoder
-        group.add_argument('--elayers', default=4, type=int,
-                           help='Number of encoder layers (for shared recognition part in multi-speaker asr mode)')
-        group.add_argument('--eunits', '-u', default=300, type=int,
-                           help='Number of encoder hidden units')
-        # Attention
-        group.add_argument('--adim', default=320, type=int,
-                           help='Number of attention transformation dimensions')
-        group.add_argument('--aheads', default=4, type=int,
-                           help='Number of heads for multi head attention')
-        # Decoder
-        group.add_argument('--dlayers', default=1, type=int,
-                           help='Number of decoder layers')
-        group.add_argument('--dunits', default=320, type=int,
-                           help='Number of decoder hidden units')
+        parser = BaseE2E.add_arguments(parser)
+        group = parser._action_groups[-1]
+        group.add_argument("--emb-path", type=str, default=EMB_PATH)
+        group.add_argument("--emb-dim", type=int, default=EMB_DIM)
         return parser
-
-    @property
-    def attention_plot_class(self):
-        """Return PlotAttentionReport."""
-        return PlotAttentionReport
 
     def __init__(self, idim, odim, args, ignore_id=-1):
         """Construct an E2E object.
@@ -97,24 +50,13 @@ class E2E(ASRInterface, torch.nn.Module):
         :param int odim: dimension of outputs
         :param Namespace args: argument Namespace containing options
         """
-        torch.nn.Module.__init__(self)
-            
-        self.encoder = Encoder(
-            idim=idim,
-            attention_dim=args.adim,
-            attention_heads=args.aheads,
-            linear_units=args.eunits,
-            num_blocks=args.elayers,
-            input_layer=args.transformer_input_layer,
-            dropout_rate=args.dropout_rate,
-            positional_dropout_rate=args.dropout_rate,
-            attention_dropout_rate=args.transformer_attn_dropout_rate
-        )
+        args.mtlalpha = 0.
+        args.report_cer = args.report_wer = False
+        super(E2E, self).__init__(idim, odim, args, ignore_id=-1)
 
-        dec_input = load_pretrained_embedding_from_file(EMB_PATH, args.char_list, freeze=True)
-
-        self.decoder = Decoder(
-            odim=odim,
+    def build_decoder(self, odim, args):
+        return Decoder(
+            odim=args.emb_dim,
             attention_dim=args.adim,
             attention_heads=args.aheads,
             linear_units=args.dunits,
@@ -123,35 +65,13 @@ class E2E(ASRInterface, torch.nn.Module):
             positional_dropout_rate=args.dropout_rate,
             self_attention_dropout_rate=args.transformer_attn_dropout_rate,
             src_attention_dropout_rate=args.transformer_attn_dropout_rate,
-            input_layer=dec_input,
-            emb_dim=EMB_DIM
+            input_layer=load_pretrained_embedding_from_file(
+                args.emb_path, args.char_list, freeze=True
+            )
         )
 
-        self.char_list = args.char_list
-        self.sos = self.eos = self.char_list.index("</s>")
-        self.pad = self.char_list.index("<pad>")
-
-        self.odim = odim
-        self.ignore_id = ignore_id
-        self.subsample = get_subsample(args, mode='asr', arch='transformer')
-        self.reporter = Reporter()
-
-        self.criterion = MaskedMSELoss()
-
-        # self.verbose = args.verbose
-        self.reset_parameters(args)
-        self.adim = args.adim
-        self.mtlalpha = args.mtlalpha
-        self.ctc = None
-
-        self.error_calculator = None
-        self.rnnlm = None
-
-    def reset_parameters(self, args):
-        """Initialize parameters."""
-        # initialize parameters
-        # TODO: apparently, this does not change the weights of the embeddings
-        initialize(self, args.transformer_init)
+    def build_criterion(self, args):
+        return MaskedMSELoss()
 
     def forward(self, xs_pad, ilens, ys_pad, calc_metrics=False, compat_on=True):
         """E2E forward.
@@ -203,6 +123,12 @@ class E2E(ASRInterface, torch.nn.Module):
             return output["loss"]
 
         return losses
+
+    def scorers(self):
+        raise NotImplementedError
+
+    def recognize(self, x, recog_args, char_list=None, rnnlm=None, use_jit=False):
+        raise NotImplementedError
 
     def predict(self, xs_pad, ilens, ys_pad, ylens):
 
@@ -273,25 +199,6 @@ class E2E(ASRInterface, torch.nn.Module):
             self.reporter.report(**metrics)
         else:
             logging.debug('loss (=%f) is not correct', loss.item())
-
-    def calculate_all_attentions(self, xs_pad, ilens, ys_pad):
-        """E2E attention calculation.
-
-        :param torch.Tensor xs_pad: batch of padded input sequences (B, Tmax, idim)
-        :param torch.Tensor ilens: batch of lengths of input sequences (B)
-        :param torch.Tensor ys_pad: batch of padded token id sequence tensor (B, Lmax)
-        :return: attention weights with the following shape,
-            1) multi-head case => attention weights (B, H, Lmax, Tmax),
-            2) other case => attention weights (B, Lmax, Tmax).
-        :rtype: float ndarray
-        """
-        with torch.no_grad():
-            self.forward(xs_pad, ilens, ys_pad)
-        ret = dict()
-        for name, m in self.named_modules():
-            if isinstance(m, MultiHeadedAttention):
-                ret[name] = m.attn.cpu().numpy()
-        return ret
 
     def tokens_to_string(self, tokens):
         tokens = list(tokens)

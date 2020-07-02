@@ -32,6 +32,8 @@ def parse_args():
     parser.add_argument("--min-length-words", type=int, default=MIN_LENGTH_WORDS)
     parser.add_argument("--drop-unknown", action="store_true")
     parser.add_argument("--drop-overlapping", action="store_true")
+    parser.add_argument("--deaccent", action="store_true")
+    parser.add_argument("--lowercase", action="store_true")
     parser.add_argument("--njobs", type=int, default=NJOBS)
     return parser.parse_args()
 
@@ -111,15 +113,22 @@ def filter_utterances(utterances, options):
        )
 
     def clean_text(text):
-        return strip_accents(
-            text.lower()
-            .replace("'m", "hem")
+        if options.lowercase:
+            text = text.lower()
+
+        text = (
+            text.replace("'m", "hem")
             .replace("'k", "ik")
             .replace("'t", "het")
             .replace("d'r", "daar")
             .replace("ggg", "xxx")
             .translate(str.maketrans('', '', string.punctuation))
         )
+
+        if options.deaccent:
+            text = strip_accents(text)
+
+        return text
 
     # Clean texts: remove accents, lower, replace contractions, remove punctuation
     utterances["text"] = utterances["ORT"].map(clean_text)

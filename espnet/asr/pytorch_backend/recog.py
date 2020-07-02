@@ -59,6 +59,9 @@ def recog(args):
         return dec_pred
 
     def tokens2str(y, sep=" "):
+        y = list(y)
+        if model.eos in y:
+            y = y[:y.index(model.eos)]
         return sep.join((model.char_list[yi] for yi in y))
 
     def tokens2sentence(y):
