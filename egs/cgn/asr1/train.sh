@@ -25,7 +25,9 @@ setup_target(){
       dict=data/lang_word/${train_set}_word_units.txt
       json_prefix="data_words"
       SCRIPT=w2v_train.py
-      model_class=espnet.nets.pytorch_backend.e2e_w2v:E2E
+      [[ "$train_config" = *"transformer"* ]] \
+        && model_class=espnet.nets.pytorch_backend.e2e_w2v_transformer:E2E \
+        || model_class=espnet.nets.pytorch_backend.e2e_w2v:E2E
       ;;
     "pos")
       dict=data/lang_word/${train_set}_pos_units.txt

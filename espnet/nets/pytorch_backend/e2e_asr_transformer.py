@@ -99,8 +99,15 @@ class E2E(ASRInterface, torch.nn.Module):
         self.decoder = self.build_decoder(odim, args)
 
         self.char_list = args.char_list
-        self.sos = self.eos = self.char_list.index("</s>")
-        self.pad = self.char_list.index("<pad>")
+        
+        try: # HACK (temporary)
+            self.sos = self.eos = self.char_list.index("</s>")
+        except ValueError:
+            self.sos = self.eos = self.char_list.index("<eos>")
+        try: # HACK (temporary)
+            self.pad = self.char_list.index("<pad>")
+        except ValueError:
+            self.pad = None
 
         self.odim = odim
         self.ignore_id = ignore_id

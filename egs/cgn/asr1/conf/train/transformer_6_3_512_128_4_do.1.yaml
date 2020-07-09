@@ -6,7 +6,7 @@ eunits: 512
 dlayers: 3
 dunits: 512
 # attention related
-adim: 128
+adim: 256 
 aheads: 4
 
 # minibatch related

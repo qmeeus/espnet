@@ -89,35 +89,29 @@ class Decoder(ScorerInterface, torch.nn.Module):
                         dropout_rate=.1,
                         positional_dropout_rate=.1, 
                         pos_enc_class=PositionalEncoding):
-        
-        pos_enc = pos_enc_class(self.attention_dim, positional_dropout_rate)
 
         if input_layer == "embed":
-            return torch.nn.Sequential(
-                torch.nn.Embedding(self.output_dim, self.attention_dim),
-                pos_enc
-            )
+            layer = torch.nn.Sequential(torch.nn.Embedding(self.output_dim, self.attention_dim))
         
         elif input_layer == "linear":
-            return torch.nn.Sequential(
+            layer = torch.nn.Sequential(
                 torch.nn.Linear(self.output_dim, attention_dim),
                 torch.nn.LayerNorm(self.attention_dim),
                 torch.nn.Dropout(dropout_rate),
                 torch.nn.ReLU(),
-                pos_enc
             )
         
         elif isinstance(input_layer, torch.nn.Module):
-            return torch.nn.Sequential(
-                input_layer,
-                pos_enc
-            )
+            layer = torch.nn.Sequential(input_layer)
         
         elif input_layer is None:
-            return
-        
+            layer = torch.nn.Sequential()
+
         else:
             raise NotImplementedError("only `embed` or torch.nn.Module is supported.")
+
+        layer.add_module("positional_encoding", pos_enc_class(self.attention_dim, positional_dropout_rate))
+        return layer
 
     def forward(self, tgt, tgt_mask, memory, memory_mask):
         """Forward decoder.

@@ -259,7 +259,8 @@ def main(cmd_args):
         char_list = [entry.decode('utf-8').split(' ')[0]
                      for entry in dictionary]
         char_list.insert(0, '<blank>')
-        char_list.append('<eos>')
+        if "</s>" not in char_list:
+            char_list.append('</s>')
         args.char_list = char_list
     else:
         args.char_list = None

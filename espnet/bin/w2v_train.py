@@ -223,13 +223,9 @@ def main(cmd_args):
     parser = get_parser()
     args, _ = parser.parse_known_args(cmd_args)
 
-    if args.model_class is None:
-        model_class = "espnet.nets.pytorch_backend.e2e_w2v:E2E"
-    else:
-        model_class = args.model_class
-    model_class = dynamic_import(model_class)
+    model_class = dynamic_import(args.model_class or "espnet.nets.pytorch_backend.e2e_w2v:E2E")
+    
     model_class.add_arguments(parser)
-
     args = parser.parse_args(cmd_args)
 
     # logging info
@@ -253,10 +249,14 @@ def main(cmd_args):
 
     # load dictionary for debug log
     assert args.dict is not None and Path(args.dict).exists()
-    with open(args.dict, encoding='utf-8') as f:
-        char_list = ['<blank>', *[entry.split(' ')[0] for entry in f.readlines()], '<eos>']
+    with open(args.dict, 'rb') as f:
+        char_list = [entry.decode('utf-8').split(' ')[0] for entry in f.readlines()]
+    
+    char_list.insert(0, '<blank>')
+    if "</s>" not in char_list:
+        char_list.append('</s>')
     args.char_list = char_list
-
+    
     # train
     if not args.v1:
         from espnet.mtl.train import train

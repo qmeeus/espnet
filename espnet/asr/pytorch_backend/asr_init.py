@@ -115,6 +115,7 @@ def get_trained_model_state_dict(model_path):
         (str): Type of model. Either ASR/MT or LM.
 
     """
+
     conf_path = os.path.join(os.path.dirname(model_path), 'model.json')
     if 'rnnlm' in model_path:
         logging.warning('reading model parameters from %s', model_path)

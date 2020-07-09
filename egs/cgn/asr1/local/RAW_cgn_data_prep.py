@@ -17,9 +17,9 @@ def parse_args():
     return parser.parse_args()
 
 
-def filter_files(files, comp="a;b;c;d;e;f;g;h;i;j;k;l;m;n;o", lang="nl;vl"):
-    comp_mask = files["comp"].isin(comp.split(";"))
-    lang_mask = files["lang"].isin(lang.split(";"))
+def filter_files(files, comp="abcdefghijklmno", lang="nl;vl"):
+    comp_mask = files["comp"].isin(list(comp))
+    lang_mask = files["lang"].isin(list(comp))
     selection = files[(comp_mask) & (lang_mask)]
     return selection
 
