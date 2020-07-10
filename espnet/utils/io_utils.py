@@ -99,7 +99,6 @@ class LoadInputsAndTargets(object):
         x_feats_dict = OrderedDict()  # OrderedDict[str, List[np.ndarray]]
         y_feats_dict = OrderedDict()  # OrderedDict[str, List[np.ndarray]]
         uttid_list = []  # List[str]
-
         for uttid, info in batch:
             uttid_list.append(uttid)
 
@@ -148,7 +147,7 @@ class LoadInputsAndTargets(object):
                             filetype=inp.get('filetype', 'mat'))
 
                     y_feats_dict.setdefault(inp['name'], []).append(x)
-
+                    
         if self.mode == 'asr':
             return_batch, uttid_list = self._create_batch_asr(
                 x_feats_dict, y_feats_dict, uttid_list)

@@ -20,6 +20,9 @@ setup_target(){
     "wordpiece")
       dict=data/lang_unigram/${train_set}_unigram_${vocab_size}_units.txt
       json_prefix="data_unigram_${vocab_size}"
+      [[ "$train_config" = *"transformer"* ]] \
+        && model_class=espnet.nets.pytorch_backend.e2e_asr_transformer:E2E \
+        || model_class=espnet.nets.pytorch_backend.e2e_asr:E2E
       ;;
     "word")
       dict=data/lang_word/${train_set}_word_units.txt
@@ -33,9 +36,9 @@ setup_target(){
       dict=data/lang_word/${train_set}_pos_units.txt
       json_prefix="data_pos_300"
       ;;
-    "xlmr")
-      dict=data/lang_xlmr.base/${train_set}_xlmr_units.txt
-      json_prefix="data_unigram_25000"
+    "vector")
+      dict="none"
+      json_prefix="data_vectors_bert_dutch"
       SCRIPT=w2v_train.py
       model_class=espnet.nets.pytorch_backend.e2e_xlmr_transformer:E2E
       ;;

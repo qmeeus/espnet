@@ -100,14 +100,16 @@ class E2E(ASRInterface, torch.nn.Module):
 
         self.char_list = args.char_list
         
-        try: # HACK (temporary)
-            self.sos = self.eos = self.char_list.index("</s>")
-        except ValueError:
-            self.sos = self.eos = self.char_list.index("<eos>")
-        try: # HACK (temporary)
-            self.pad = self.char_list.index("<pad>")
-        except ValueError:
-            self.pad = None
+        # HACK: error prone: char_list can only be None when working with vectors
+        if self.char_list:
+            try:
+                self.sos = self.eos = self.char_list.index("</s>")
+            except ValueError:
+                self.sos = self.eos = self.char_list.index("<eos>")
+            try: # HACK (temporary)
+                self.pad = self.char_list.index("<pad>")
+            except ValueError:
+                self.pad = None
 
         self.odim = odim
         self.ignore_id = ignore_id

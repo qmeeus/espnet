@@ -10,33 +10,20 @@ from espnet.nets.pytorch_backend.losses import MaskedMSELoss
 from espnet.nets.pytorch_backend.transformer.add_sos_eos import add_sos_eos
 from espnet.nets.pytorch_backend.transformer.attention import MultiHeadedAttention
 from espnet.nets.pytorch_backend.transformer.decoder_w2v import Decoder
-from espnet.nets.pytorch_backend.transformer.mask import target_mask
+from espnet.nets.pytorch_backend.transformer.mask import subsequent_mask
 from espnet.utils.torch_utils import load_pretrained_embedding_from_file
 from espnet.nets.pytorch_backend.e2e_w2v_transformer import E2E as BaseE2E
 from espnet.nets.pytorch_backend.e2e_asr_transformer import E2E as ASRE2E
 
 
-class Teacher(torch.nn.Module):
-
-    def __init__(self, model_string):
-        super(Teacher, self).__init__()
-        self.model = torch.hub.load(*self.parse_model_string(model_string))
-        self.model.eval()
-        self.freeze()
-        self.to('cpu')
-
-    def forward(self, tokens):
-        return self.model.extract_features(tokens.to('cpu')).to(tokens.device)
-
-    def freeze(self):
-        for param in self.parameters():
-            param.requires_grad = False
-
-    @staticmethod
-    def parse_model_string(model_string):
-        parts = model_string.split("/")
-        return "/".join(parts[:-1]), parts[-1]
-
+def target_mask(ys_pad, ignore_id=0, mask_eos=True):
+    mask = (ys_pad == ignore_id).all(axis=-1)
+    maxlen = mask.size(1)
+    if mask_eos:
+        for item_idx, token_idx in enumerate((~mask).sum(-1)):
+            mask[item_idx, token_idx - 1] = False
+    m = subsequent_mask(mask.size(-1), device=mask.device).unsqueeze(0)
+    return mask.unsqueeze(-2) & m
 
 class E2E(BaseE2E):
     """E2E module.
@@ -80,7 +67,7 @@ class E2E(BaseE2E):
             positional_dropout_rate=args.dropout_rate,
             self_attention_dropout_rate=args.transformer_attn_dropout_rate,
             src_attention_dropout_rate=args.transformer_attn_dropout_rate,
-            input_layer=Teacher(args.pretrained_model)
+            input_layer="linear"  #Teacher(args.pretrained_model)
         )
 
     def forward(self, xs_pad, ilens, ys_pad, calc_metrics=False, compat_on=True):
@@ -107,14 +94,13 @@ class E2E(BaseE2E):
         hlens = hs_mask.sum(-1)
 
         # 2. forward decoder
-        ys_in_pad, ys_out_pad = add_sos_eos(ys_pad, self.sos, self.eos, self.ignore_id, ys_out_padding=self.pad)
-        ys_mask = target_mask(ys_in_pad, self.ignore_id)
+        ys_in_pad, ys_out_pad = ys_pad[:, :-1].clone(), ys_pad[:, 1:].clone()
+        ys_mask = target_mask(ys_in_pad)
         pred_pad, pred_mask = self.decoder(ys_in_pad, ys_mask, hs_pad, hs_mask)
         self.pred_pad = pred_pad
 
         # 3. compute attention loss
-        ys_out_emb = self.decoder.embed[0](ys_out_pad)
-        loss_att = self.criterion(pred_pad, ys_out_emb, (ys_pad != self.ignore_id).sum(-1) + 1)
+        loss_att = self.criterion(pred_pad, ys_out_pad, (ys_out_pad != 0).any(-1).sum(-1))
         losses = {"loss": loss_att}
 
         # 3. Metrics HACK

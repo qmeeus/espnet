@@ -63,7 +63,7 @@ CONFIG = {
     ),
     "outdir": dict(type=str, required=True, help='Output directory'),
     "debugmode": dict(default=1, type=int, help='Debugmode'),
-    "dict": dict(required=True, help='Dictionary'),
+    "dict": dict(required=False, default=None, help='Dictionary'),
     "seed": dict(default=1, type=int, help='Random seed'),
     "debugdir": dict(type=str, help='Output directory for debugging'),
     "resume": dict(default='', nargs='?', help='Resume the training from snapshot'),
@@ -248,15 +248,18 @@ def main(cmd_args):
     np.random.seed(args.seed)
 
     # load dictionary for debug log
-    assert args.dict is not None and Path(args.dict).exists()
-    with open(args.dict, 'rb') as f:
-        char_list = [entry.decode('utf-8').split(' ')[0] for entry in f.readlines()]
+    if args.dict is not None and Path(args.dict).exists():
+        with open(args.dict, 'rb') as f:
+            char_list = [entry.decode('utf-8').split(' ')[0] for entry in f.readlines()]
     
-    char_list.insert(0, '<blank>')
-    if "</s>" not in char_list:
-        char_list.append('</s>')
-    args.char_list = char_list
-    
+        char_list.insert(0, '<blank>')
+        if "</s>" not in char_list:
+            char_list.append('</s>')
+        args.char_list = char_list
+
+    else:
+        args.char_list = None
+
     # train
     if not args.v1:
         from espnet.mtl.train import train
