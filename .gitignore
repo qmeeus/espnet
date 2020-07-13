@@ -45,7 +45,7 @@ egs/*/*/mfcc
 egs/*/*/stft
 egs/*/*/tensorboard
 egs/*/*/wav*
-egs/*/*/target
+egs/*/*/vectors
 
 # tools related
 tools/bin
