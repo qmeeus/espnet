@@ -1,4 +1,4 @@
-#!/bin/bash -e
+#!/bin/bash -ex
 
 . setup.sh
 . path.sh
@@ -8,6 +8,8 @@
 
 set -u
 set -o pipefail
+
+OPTIONS=""
 
 setup_target(){
   SCRIPT=asr_train.py
@@ -25,8 +27,8 @@ setup_target(){
         || model_class=espnet.nets.pytorch_backend.e2e_asr:E2E
       ;;
     "word")
-      dict=data/lang_word/${train_set}_word_units.txt
-      json_prefix="data_words"
+      dict=${dict:-data/lang_word/${train_set}_word_units.txt}
+      json_prefix="${json_prefix:-data_words}"
       SCRIPT=w2v_train.py
       [[ "$train_config" = *"transformer"* ]] \
         && model_class=espnet.nets.pytorch_backend.e2e_w2v_transformer:E2E \
@@ -46,6 +48,7 @@ setup_target(){
       echo "Invalid target: $target" && exit 1
       ;;
   esac
+
 }
 
 setup_target
@@ -53,12 +56,17 @@ verbose=${verbose:-0}
 train_features=dump/${train_set}/deltafalse
 dev_features=dump/${dev_set}/deltafalse
 validset_tag=${validset_tag:-$dataset_tag}
+train_json=${train_features}/${json_prefix}.${dataset_tag}.json
+valid_json=${dev_features}/${json_prefix}.${validset_tag}.json
 
-OPTIONS=""
-[ -z "${enc_init}" ] || OPTIONS="--enc-init $enc_init"
+OPTIONS="--dict $dict --train-json $train_json --valid-json $valid_json"
+[ -z "${enc_init}" ] || OPTIONS="$OPTIONS --enc-init $enc_init"
 [ -z "$dec_init" ] || OPTIONS="$OPTIONS --dec-init $dec_init"
 [ -z "$tensorboard_dir" ] || OPTIONS="$OPTIONS --tensorboard-dir $tensorboard_dir"
 [ -z "$freeze_encoder" ] || OPTIONS="$OPTIONS --freeze-encoder $freeze_encoder"
+[ -z "$model_class" ] || OPTIONS="$OPTIONS --model-class $model_class"
+[ -z "$emb_dim" ] || OPTIONS="$OPTIONS --emb-dim $emb_dim"
+[ -z "$emb_path" ] || OPTIONS="$OPTIONS --emb-path $emb_path"
 
 mkdir -p $output_dir
 
@@ -71,15 +79,12 @@ mkdir -p $output_dir
     --backend pytorch \
     --outdir $output_dir/results \
     --debugmode ${debugmode} \
-    --dict ${dict} \
     --ctc_type builtin \
     --debugdir $output_dir \
     --minibatches ${N} \
     --verbose $verbose \
     --resume ${resume} \
-    --train-json ${train_features}/${json_prefix}.${dataset_tag}.json \
-    --valid-json ${dev_features}/${json_prefix}.${validset_tag}.json $OPTIONS \
-    --model-class $model_class \
+    $OPTIONS \
     | tee $output_dir/train.log
 
 )  3>&1 1>&2 2>&3 | tee $output_dir/train.err

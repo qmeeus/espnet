@@ -22,6 +22,10 @@ train_config=conf/train_mtlalpha0.1.yaml
 lm_config=
 decode_config=conf/decode_ctcweight0.1.yaml
 exp_config=
+json_prefix=
+dict=
+emb_dim=
+emb_path=
 
 # # rnnlm related
 # use_wordlm=true     # false means to train/use a character LM

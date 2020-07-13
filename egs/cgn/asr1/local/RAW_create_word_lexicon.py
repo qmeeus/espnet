@@ -1,4 +1,3 @@
-# coding: utf-8
 import os
 import json
 from collections import Counter, defaultdict
@@ -7,6 +6,13 @@ from pathlib import Path
 import argparse
 from functools import partial
 from unidecode import unidecode
+
+
+"""
+Usage:
+python local/RAW_create_word_lexicon.py --source-dataset data_unigram_5000.\{\}.json --subsets train valid
+python local/RAW_create_word_lexicon.py --source-dataset data_unigram_5000.\{\}.json --subsets test --datatags a b f g h i j k l m n o --use-existing-vocab
+"""
 
 
 DROP_REASON = {
@@ -59,6 +65,8 @@ def parse_args():
                         default="data_unigram_1000.{}.json",
                         help="What json file to use in the data directory. "
                         "{} is replaced by one of DATATAGS and should be escaped in bash.")
+
+    parser.add_argument("--json-prefix", type=str, default="data_words")
 
     parser.add_argument("--subsets", nargs="*",
                         default=["train", "valid", "test"],
@@ -270,7 +278,7 @@ if __name__ == '__main__':
 
             print(f"{ignored:,}/{total:,} sentences were dropped ({ignored / total:.2%})")
 
-            newfile = f"{data_dir}/data_words.{tag}.json"
+            newfile = f"{data_dir}/{options.json_prefix}.{tag}.json"
             with open(newfile, "w") as outfile:
                 json.dump({"utts": new_dataset}, outfile)
 
