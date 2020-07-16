@@ -17,6 +17,7 @@ import sys
 import configargparse
 import numpy as np
 
+from espnet.utils.cli_utils import count_gpus
 from espnet.nets.lm_interface import dynamic_import_lm
 from espnet.optimizer.factory import dynamic_import_optimizer
 from espnet.scheduler.scheduler import dynamic_import_scheduler

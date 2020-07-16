@@ -15,7 +15,7 @@ import configargparse
 import numpy as np
 
 from espnet.nets.tts_interface import TTSInterface
-from espnet.utils.cli_utils import strtobool
+from espnet.utils.cli_utils import strtobool, count_gpus
 from espnet.utils.training.batchfy import BATCH_COUNT_CHOICES
 
 
