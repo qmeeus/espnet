@@ -35,15 +35,12 @@ class InputExample:
         guid: Unique id for the example.
         input_text: string. The untokenized text of the first sequence. For single
             sequence tasks, only this sequence must be specified.
-        action: string. The label of the example. This should be
-            specified for train and dev examples, but not for test examples.
-        instruction: list of int: a vector of 1s and 0s.
+        target: list of int: a vector of 1s and 0s.
     """
 
     guid: str
     input_text: str
-    action: str
-    instruction: List[int]
+    labels: List[int]
 
     def to_json_string(self):
         """Serializes this instance to a JSON string."""
@@ -69,8 +66,7 @@ class InputFeatures:
     input_ids: List[int]
     attention_mask: Optional[List[int]] = None
     token_type_ids: Optional[List[int]] = None
-    actions: Optional[int] = None
-    instructions: Optional[List[int]] = None
+    labels: Optional[List[int]] = None
 
     def to_json_string(self):
         """Serializes this instance to a JSON string."""
@@ -111,13 +107,26 @@ class STIProcessor(DataProcessor):
     ]
     
     TEXT_COLUMN = "text"
-    LABELS = [
+    LABELS_COLUMNS = [
         "action", "throttle", "distance", "direction", "angle", 
         "pos_x", "pos_y", "position", "state", "grabber"
     ]
 
+    LABELS = [
+        'action_approach', 'action_grab', 'action_lift', 'action_move_abs', 
+        'action_move_rel', 'action_pointer', 'action_turn_abs', 'action_turn_rel', 
+        'throttle_fast', 'throttle_slow', 'distance_alot', 'distance_little', 
+        'distance_normal', 'direction_backward', 'direction_forward', 
+        'angle_east', 'angle_north', 'angle_south', 'angle_west', 
+        'pos_x_centerx', 'pos_x_left', 'pos_x_right', 
+        'pos_y_centery', 'pos_y_down', 'pos_y_up', 
+        'position_down', 'position_up', 'state_off', 'state_on', 
+        'grabber_close', 'grabber_open'
+    ]
+
+
     def __init__(self, labels=None, examples=None, verbose=False):
-        self.labels = [] if labels is None else labels
+        self.labels = self.LABELS
         self.examples = [] if examples is None else examples
         self.verbose = verbose
 
@@ -131,76 +140,76 @@ class STIProcessor(DataProcessor):
         
     def get_train_examples(self, data_dir):
         """See base class."""
-        return self.add_examples_from_csv(os.path.join(data_dir, "train.csv"), Split.train)
+        return self.add_examples_from_csv(Path(data_dir, "train.csv"), Split.train)
 
     def get_dev_examples(self, data_dir):
         """See base class."""
-        return self.add_examples_from_csv(os.path.join(data_dir, "valid.csv"), Split.dev)
+        return self.add_examples_from_csv(Path(data_dir, "valid.csv"), Split.dev)
 
     def get_test_examples(self, data_dir):
         """See base class."""
-        return self.add_examples_from_csv(os.path.join(data_dir, "test.csv"), Split.test)
+        return self.add_examples_from_csv(Path(data_dir, "test.csv"), Split.test)
 
     def add_examples_from_csv(
         self,
         file_name,
-        overwrite_labels=False,
         overwrite_examples=False,
+        overwrite_labels=False
     ):
 
         data = (
-            pd.read_csv(file_name, usecols=[self.TEXT_COLUMN] + self.LABELS)
+            pd.read_csv(file_name, usecols=[self.TEXT_COLUMN] + self.LABELS_COLUMNS)
             .drop_duplicates(ignore_index=True)
             .reset_index(drop=True)
         )
         
         texts = data[self.TEXT_COLUMN]
-        labels = (data[self.LABELS[0]].to_list(),)
-        labels += (pd.get_dummies(data[self.LABELS[1:]]).values.tolist(),)
-        labels = list(zip(*labels))
+        targets = pd.DataFrame(np.zeros((len(texts), len(self.LABELS))), columns=self.LABELS)
+        targets.update(pd.get_dummies(data[self.LABELS_COLUMNS]))
+        labels = list(targets.columns)
+        targets = targets.astype(np.int64).values.tolist()
         ids = data.index
 
         return self.add_examples(
-            texts, labels, ids, overwrite_labels=overwrite_labels, overwrite_examples=overwrite_examples
+            texts, targets=targets, ids=ids, labels=labels, 
+            overwrite_examples=overwrite_examples, 
+            overwrite_labels=overwrite_labels
         )
 
     def add_examples(
         self, texts, 
-        labels=None, 
-        ids=None, 
-        overwrite_labels=False, 
+        targets=None,
+        labels=None,
+        ids=None,
+        overwrite_labels=False,
         overwrite_examples=False
     ):
 
-        assert labels is None or len(texts) == len(labels)
+        assert targets is None or len(texts) == len(targets)
         assert ids is None or len(texts) == len(ids)
         if ids is None:
             ids = [None] * len(texts)
-        if labels is None:
-            labels = [None] * len(texts)
+        if targets is None:
+            targets = [None] * len(texts)
         examples = []
-        added_labels = set()
-        for (text, label, guid) in zip(texts, labels, ids):
-            action, instruction = label
-            added_labels.add(action)
+        for text, target, guid in zip(texts, targets, ids):
             examples.append(InputExample(
                 guid=guid, 
-                input_text=text, 
-                action=action, 
-                instruction=instruction
+                input_text=text,
+                labels=target
             ))
+
+        # Update labels
+        if labels and overwrite_labels:
+            self.labels = labels
+        else:
+            self.labels = list(set(self.labels).union(labels))
 
         # Update examples
         if overwrite_examples:
             self.examples = examples
         else:
             self.examples.extend(examples)
-
-        # Update labels
-        if overwrite_labels:
-            self.labels = list(added_labels)
-        else:
-            self.labels = list(set(self.labels).union(added_labels))
 
         return self.examples
 
@@ -231,7 +240,7 @@ class STIProcessor(DataProcessor):
         if max_length is None:
             max_length = tokenizer.max_len
 
-        label_map = {label: i for i, label in enumerate(self.labels)}
+        # label_map = {label: i for i, label in enumerate(self.labels)}
 
         all_input_ids = []
         for (ex_index, example) in enumerate(self.examples):
@@ -269,20 +278,17 @@ class STIProcessor(DataProcessor):
                 len(attention_mask), batch_length
             )
 
-            action_id = label_map[example.action]
-
             if ex_index < 5 and self.verbose:
                 logger.info("*** Example ***")
                 logger.info("guid: %s" % (example.guid))
                 logger.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
                 logger.info("attention_mask: %s" % " ".join([str(x) for x in attention_mask]))
-                logger.info("label: %s (id = %d)" % (example.action, action_id))
+                logger.info(f"target shape: {example.labels.shape}")
 
             features.append(InputFeatures(
                 input_ids=input_ids, 
                 attention_mask=attention_mask, 
-                actions=action_id,
-                instructions=example.instruction
+                labels=example.labels
             ))
 
         if return_tensors is None:
@@ -310,10 +316,9 @@ class STIProcessor(DataProcessor):
 
             all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
             all_attention_mask = torch.tensor([f.attention_mask for f in features], dtype=torch.long)
-            all_labels = torch.tensor([f.label[0] for f in features], dtype=torch.long)
-            all_instructions = torch.tensor([f.label[1] for f in features], dtype=torch.long)
+            all_labels = torch.tensor([f.label for f in features], dtype=torch.long)
 
-            dataset = TensorDataset(all_input_ids, all_attention_mask, all_labels, all_instructions)
+            dataset = TensorDataset(all_input_ids, all_attention_mask, all_labels)
             return dataset
         else:
             raise ValueError("return_tensors should be one of 'tf' or 'pt'")

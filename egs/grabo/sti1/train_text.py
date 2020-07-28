@@ -2,6 +2,7 @@ import dataclasses
 import logging
 import os
 import sys
+import numpy as np
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional
 
@@ -15,6 +16,8 @@ from transformers import (
     TrainingArguments,
     set_seed,
 )
+
+from transformers.data.metrics import simple_accuracy
 
 from text_dataset import TextDataTrainingArguments, TextDataset
 
@@ -50,25 +53,23 @@ class IntentClassifier(nn.Module):
         self.input_dim = input_dim
         self.output_dim = output_dim
 
-        self.pre_classifier = nn.Sequential(
-            nn.Linear(input_dim, input_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout_rate)
-        )
-        self.output_layer = nn.Linear(input_dim, output_dim)
-        # self.init_weights()        
+        # self.pre_classifier = nn.Sequential(
+        #     nn.Linear(input_dim, input_dim),
+        #     nn.ReLU(),
+        #     nn.Dropout(dropout_rate)
+        # )
 
-    def forward(self, inputs, target=None):
-        pooled_output = self.pre_classifier(inputs)
+        self.output_layer = nn.Linear(input_dim, output_dim)
+        self.loss_fn = nn.BCEWithLogitsLoss()
+
+    def forward(self, inputs, labels=None):
+        # pooled_output = self.pre_classifier(inputs)
+        pooled_output = inputs
         logits = self.output_layer(pooled_output)
         outputs = (logits,)
-        
-        if target is not None:
-            loss = nn.MSELoss()(
-                logits.view(-1, self.output_dim), 
-                target.view(-1, self.output_dim)
-            )
-            
+
+        if labels is not None:
+            loss = self.loss_fn(logits, labels.float())
             outputs = (loss,) + outputs
 
         return outputs
@@ -138,7 +139,7 @@ class Speech2IntentModel(DistilBertPreTrainedModel):
         attention_mask=None,
         head_mask=None,
         inputs_embeds=None,
-        target=None,
+        labels=None,
         # actions=None,
         # instructions=None,
         output_attentions=None,
@@ -155,8 +156,27 @@ class Speech2IntentModel(DistilBertPreTrainedModel):
         )
 
         hidden_state = distilbert_output[0]  # (bs, seq_len, dim)
-        outputs = self.classifier(hidden_state[:, 0], target=target)
+        outputs = self.classifier(hidden_state[:, 0], labels=labels)
         return outputs + distilbert_output[1:]
+
+
+
+def data_collator(features):
+    if not isinstance(features[0], dict):
+        features = [vars(f) for f in features]
+
+    first = features[0]
+    batch = {}
+
+    # Again, we will use the first element to figure out which key/values are not None for this model.
+    for k, v in first.items():
+        if v is not None and not isinstance(v, str):
+            if isinstance(v, torch.Tensor):
+                batch[k] = torch.stack([f[k] for f in features])
+            else:
+                batch[k] = torch.tensor([f[k] for f in features], dtype=torch.long)
+
+    return batch
 
 
 def build(model_name_or_path):
@@ -168,6 +188,14 @@ def build(model_name_or_path):
     tokenizer = DistilBertTokenizer.from_pretrained(model_name_or_path)
     model = Speech2IntentModel.from_pretrained(model_name_or_path, config=config)
     return tokenizer, model
+
+
+def build_compute_metrics_fn():
+    def compute_metrics_fn(p):
+        preds = (p.predictions >= .5).astype(np.int64)
+        return {'acc': simple_accuracy(preds, p.label_ids)}
+    return compute_metrics_fn
+
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -234,19 +262,15 @@ def main():
         else None
     )
 
-    # def collator(batch):
-    #     keys = ["input_ids", "attention_mask", "actions", "instructions"]
-    #     import ipdb; ipdb.set_trace()
-    #     return {k: v for k, v in zip(keys, batch)}
-
     # Initialize our Trainer
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        # compute_metrics=build_compute_metrics_fn(data_args.task_name),
-        # data_collator=collator
+        compute_metrics=build_compute_metrics_fn(),
+        # prediction_loss_only=True,
+        data_collator=data_collator
     )
 
     # Training
