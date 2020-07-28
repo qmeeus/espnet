@@ -13,7 +13,7 @@ aheads: 8
 mtlalpha: 0.4
 
 # minibatch related
-batch-size: 32 
+batch-size: 20 
 maxlen-in: 512  # if input length  > maxlen-in, batchsize is automatically reduced
 maxlen-out: 50 # if output length > maxlen-out, batchsize is automatically reduced
 
