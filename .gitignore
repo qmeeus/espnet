@@ -46,6 +46,7 @@ egs/*/*/stft
 egs/*/*/tensorboard
 egs/*/*/wav*
 egs/*/*/vectors
+egs/*/*/runs
 
 # tools related
 tools/bin
