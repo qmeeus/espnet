@@ -26,6 +26,7 @@ class Encoder:
     # JSON_PREFIX = "data_vectors_xlmr"
 
     LOADER = "huggingface_bert"
+    MODEL_BASE_CLASS = "BertModel"
     PRETRAINED_MODEL =  f"wietsedv/bert-base-dutch-cased"
     OUTPUT_FILE = Path(f"vectors/target_vectors_bert_dutch.h5").absolute()
     JSON_PREFIX = "data_vectors_bert_dutch"
@@ -36,6 +37,7 @@ class Encoder:
         parser.add_argument("input_texts", type=Path)
         parser.add_argument("--pretrained-model", default=cls.PRETRAINED_MODEL)
         parser.add_argument("--loader", default=cls.LOADER)
+        parser.add_argument("--model-base-class", default=cls.MODEL_BASE_CLASS)
         parser.add_argument("--gpu", type=int, default=None)
         parser.add_argument("--jsonfiles", type=Path, nargs="+", required=True)
         parser.add_argument("--json-prefix", type=str, default=cls.JSON_PREFIX)
@@ -47,11 +49,13 @@ class Encoder:
     def __init__(self, jsonfiles,
                  pretrained_model=PRETRAINED_MODEL,
                  loader=LOADER,
+                 model_base_class=MODEL_BASE_CLASS,
                  json_prefix=JSON_PREFIX,
                  output_file=OUTPUT_FILE,
                  gpu=None):
 
         self.loader = loader
+        self.model_base_class = model_base_class
         self.device = f'cuda:{gpu}' if gpu is not None else 'cpu'
         # self.model = self.load_pretrained_model(pretrained_model)
         self.tokenizer, self.model = self.load_pretrained_model(pretrained_model)
@@ -62,6 +66,13 @@ class Encoder:
         os.makedirs(self.output_file.parent, exist_ok=True)
 
     def load_pretrained_model(self, model_string):
+        import transformers
+        tokenizer = transformers.AutoTokenizer.from_pretrained(model_string)
+        model = getattr(transformers, self.model_base_class).from_pretrained(model_string)
+        return tokenizer, model
+
+
+    def _load_pretrained_model(self, model_string):
         from transformers import BertTokenizer, BertModel
         tokenizer = BertTokenizer.from_pretrained(model_string)
         model = BertModel.from_pretrained(model_string)
