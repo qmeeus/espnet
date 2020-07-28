@@ -14,7 +14,7 @@ set -u
 set -o pipefail
 
 dict=data/lang_word/CGN_train_word_units.txt
-json_prefix="data_words"
+json_prefix=${json_prefix:-data_words}
 
 if [ -z "$resume" ]; then
   echo "Not specified which model to evaluate"
