@@ -13,8 +13,10 @@ fi
 set -u
 set -o pipefail
 
-dict=data/lang_word/CGN_train_word_units.txt
+dict=${dict:-data/lang_word/CGN_train_word_units.txt}
 json_prefix=${json_prefix:-data_words}
+
+[ "$target" == vector ] && model_class=espnet.nets.pytorch_backend.e2e_xlmr_transformer:E2E
 
 if [ -z "$resume" ]; then
   echo "Not specified which model to evaluate"
@@ -33,22 +35,23 @@ for dataset in $(ls $test_features/${json_prefix}.?.json); do
 
     w2v_recog.py \
       --v1 \
+      --task ${target:-word} \
+      --model-class ${model_class} \
       --config ${train_config} \
-      --ngpu 0 \
+      --ngpu 1 \
       --outdir $outdir/results \
       --debugmode ${debugmode} \
       --dict ${dict} \
-      --ctc_type builtin \
       --debugdir $outdir \
       --verbose $verbose \
       --enc-init $resume \
       --dec-init $resume \
-      --test-json $dataset \
-    > $outdir/test.log 2> $outdir/test.err
+      --test-json $dataset #\
+    #> $outdir/test.log 2> $outdir/test.err
 
-  ) &
+  ) #&
 
-  pids+=($!) # store background pids
+  #pids+=($!) # store background pids
 done
 
 i=0; for pid in "${pids[@]}"; do wait ${pid} || ((++i)); done

@@ -5,6 +5,8 @@ import torch
 import pandas as pd
 from pathlib import Path
 import h5py
+from logger import setup
+from time import time
 
 """
 Usage:
@@ -16,7 +18,6 @@ Usage:
         --pretrained-model wietsedv/bert-base-dutch-cased --loader huggingface_bert \
         --output-file vectors/target_vectors_bert_dutch.h5
 """
-
 
 class Encoder:
 
@@ -57,20 +58,22 @@ class Encoder:
         self.loader = loader
         self.model_base_class = model_base_class
         self.device = f'cuda:{gpu}' if gpu is not None else 'cpu'
-        # self.model = self.load_pretrained_model(pretrained_model)
+        self.output_file = output_file
+        self.logger = setup(self.output_file.parent)
+        self.logger.info(f"Loading pretrained model from {pretrained_model}")
         self.tokenizer, self.model = self.load_pretrained_model(pretrained_model)
         self.configure_model(self.model, self.device)
         self.jsonfiles = jsonfiles
         self.json_prefix = json_prefix
-        self.output_file = output_file
+        self.logger.info(f"Setting to {self.output_file}")
         os.makedirs(self.output_file.parent, exist_ok=True)
 
     def load_pretrained_model(self, model_string):
-        import transformers
-        tokenizer = transformers.AutoTokenizer.from_pretrained(model_string)
-        model = getattr(transformers, self.model_base_class).from_pretrained(model_string)
+        from transformers import AutoConfig, AutoTokenizer, AutoModel
+        config = AutoConfig.from_pretrained(model_string)
+        tokenizer = AutoTokenizer.from_pretrained(model_string, config=config)
+        model = AutoModel.from_pretrained(model_string, config=config)
         return tokenizer, model
-
 
     def _load_pretrained_model(self, model_string):
         from transformers import BertTokenizer, BertModel
@@ -79,6 +82,7 @@ class Encoder:
         return tokenizer, model
 
     def load_sentences_from_file(self, filename):
+        self.logger.info(f"Loading sentences from {filename}")
         with open(filename) as txtfile:
             yield from map(
                 lambda t: (t[0], self.extract_features(t[1])), map(
@@ -89,22 +93,30 @@ class Encoder:
 
     def __call__(self, sentences):
 
+        self.logger.info("Encoding sentences")
+        t0 = time()
         shapes = {}
         with h5py.File(self.output_file, 'w') as h5_file:
             for uttid, feats in self.load_sentences_from_file(sentences):
-                h5_file.create_dataset(uttid, data=feats)
+                h5_file.create_dataset(uttid, data=feats, compression="gzip", compression_opts=9)
                 shapes[uttid] = feats.shape
+        
+        t1 = time()
+        self.logger.info(f"Sentences encoding completed in {t1 - t0:.2f}s")
 
         for filename in self.jsonfiles:
 
             parent, name = filename.parent, filename.name
             new_file = parent / ".".join([self.json_prefix, *name.split(".")[1:]])
-
+            self.logger.info(f"Processing {filename} to {new_file}")
             with open(filename) as old, open(new_file, 'w') as new:
                 json.dump({"utts": dict(map(
                     self.update_item(shapes),
                     json.load(old)["utts"].items()
                 ))}, new, indent=4)
+
+        t2 = time()
+        self.logger.info(f"Finished processing all files in {t2 - t1:.2f}s (total={t2-t0:.2f}s)")
 
     def update_item(self, shapes):
         def _update_item(item):

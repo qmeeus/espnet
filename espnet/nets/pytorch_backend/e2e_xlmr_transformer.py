@@ -127,7 +127,25 @@ class E2E(BaseE2E):
         raise NotImplementedError
 
     def predict(self, xs_pad, ilens, ys_pad, ylens):
-        raise NotImplementedError
+        
+        self.eval()
+        with torch.no_grad():
+
+            # 1. forward encoder
+            xs_pad = xs_pad[:, :max(ilens)]  # for data parallel
+            src_mask = make_non_pad_mask(ilens.tolist()).to(xs_pad.device).unsqueeze(-2)
+            hs_pad, hs_mask = self.encoder(xs_pad, src_mask)
+            hlens = hs_mask.sum(-1)
+
+            # 2. forward decoder
+            ys_in_pad, ys_out_pad = ys_pad[:, :-1].clone(), ys_pad[:, 1:].clone()
+            ys_mask = target_mask(ys_in_pad)
+            pred_pad, pred_mask = self.decoder(ys_in_pad, ys_mask, hs_pad, hs_mask)
+
+            # 3. compute attention loss
+            loss = self.criterion(pred_pad, ys_out_pad, (ys_out_pad != 0).any(-1).sum(-1))
+
+            return loss, pred_pad, pred_mask
 
     def tokens_to_string(self, tokens):
         raise NotImplementedError

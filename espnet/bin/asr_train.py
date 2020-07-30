@@ -108,7 +108,7 @@ CONFIG = {
     "batch-frames-in": dict(default=0, type=int, help='Maximum input frames in a minibatch (0 to disable)'),
     "batch-frames-out": dict(default=0, type=int, help='Maximum output frames in a minibatch (0 to disable)'),
     "batch-frames-inout": dict(
-        default=0, type=int, help='Maximum input+output frames iGENERAL_CONFIGn a minibatch (0 to disable)'),
+        default=0, type=int, help='Maximum input+output frames in a minibatch (0 to disable)'),
     "maxlen-in": dict(
         default=800, type=int, metavar='ML',
         help='When --batch-count=seq, batch size is reduced if the input sequence length > ML.'),

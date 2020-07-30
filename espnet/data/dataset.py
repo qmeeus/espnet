@@ -107,7 +107,8 @@ class ASRDataset(Dataset):
             batch = self.sort_batch(batch, "input1_length")
         return batch
 
-    def _collate(self, tensors, axis, padding_value, maxlen=None):
+    @staticmethod
+    def _collate(tensors, axis, padding_value, maxlen=None):
         maxlen = maxlen or max(tensor.size(axis) for tensor in tensors)
         size = [len(tensors), *tensors[0].size()]
         size[axis + 1] = maxlen
@@ -120,7 +121,8 @@ class ASRDataset(Dataset):
             padded_tensors[i, :] = pad(tensor, padding, mode='constant', value=padding_value)
         return padded_tensors
 
-    def sort_batch(self, batch, key="input1_length"):
+    @staticmethod
+    def sort_batch(batch, key="input1_length"):
         # batch is a dictionary
         Xlens = batch[key]
         assert torch.is_tensor(Xlens)

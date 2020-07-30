@@ -496,6 +496,7 @@ def torch_load(path, model):
         model (torch.nn.Module): Torch model.
 
     """
+
     if 'snapshot' in os.path.basename(path):
         model_state_dict = torch.load(path, map_location=lambda storage, loc: storage)['model']
     else:

@@ -6,15 +6,15 @@
 """This module contains pytorch dataset and dataloader implementation for chainer training."""
 
 import torch
-import torch.utils.data
+from torch.utils.data import Dataset, DataLoader
 
 
-class TransformDataset(torch.utils.data.Dataset):
+class TransformDataset(Dataset):
     """Transform Dataset for pytorch backend.
 
     Args:
         data: list object from make_batchset
-        transfrom: transform function
+        transform: transform function
 
     """
 
@@ -43,7 +43,7 @@ class ChainerDataLoader:
 
     def __init__(self, *args, **kwargs):
         """Init function."""
-        self.loader = torch.utils.data.dataloader.DataLoader(*args, **kwargs)
+        self.loader = DataLoader(*args, **kwargs)
         self.len = len(self.loader.dataset)
         self.current_position = 0
         self.epoch = 0
@@ -88,7 +88,7 @@ class ChainerDataLoader:
     def start_shuffle(self):
         """Shuffle function for sortagrad."""
         self.kwargs['shuffle'] = True
-        self.loader = torch.utils.data.dataloader.DataLoader(**self.kwargs)
+        self.loader = DataLoader(**self.kwargs)
 
     def finalize(self):
         """Implement finalize function."""

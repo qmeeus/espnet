@@ -87,12 +87,6 @@ CONFIG = {
         help="Input length ratio to obtain max output length.\n"
         "If maxlenratio=0.0 (default), it uses a end-detect function to automatically find maximum hypothesis lengths"),
     "minlenratio": dict(default=0.0, type=float, help='Input length ratio to obtain min output length'),
-    "ctc-weight": dict(default=0.3, type=float, help='CTC weight in joint decoding'),
-    "rnnlm": dict(type=str, default=None, help='RNNLM model file to read'),
-    "rnnlm-conf": dict(type=str, default=None, help='RNNLM model config file to read'),
-    "lm-weight": dict(default=0.1, type=float, help='RNNLM weight.'),
-    "sym-space": dict(default='<space>', type=str, help='Space symbol'),
-    "sym-blank": dict(default='<blank>', type=str, help='Blank symbol'),
 
     # Batches
     "sortagrad": dict(default=0, type=int, nargs='?', help="How many epochs to use sortagrad for. 0 = deactivated, -1 = all epochs"),
@@ -104,7 +98,7 @@ CONFIG = {
     "batch-frames-in": dict(default=0, type=int, help='Maximum input frames in a minibatch (0 to disable)'),
     "batch-frames-out": dict(default=0, type=int, help='Maximum output frames in a minibatch (0 to disable)'),
     "batch-frames-inout": dict(
-        default=0, type=int, help='Maximum input+output frames iGENERAL_CONFIGn a minibatch (0 to disable)'),
+        default=0, type=int, help='Maximum input+output frames in a minibatch (0 to disable)'),
     "maxlen-in": dict(
         default=800, type=int, metavar='ML',
         help='When --batch-count=seq, batch size is reduced if the input sequence length > ML.'),
@@ -124,7 +118,7 @@ CONFIG = {
     "threshold": dict(default=1e-4, type=float, help='Threshold to stop iteration'),
     "epochs": dict(default=30, type=int, help='Maximum number of epochs'),
     "early-stop-criterion": dict(
-        default='validation/main/accuracy', type=str, nargs='?',
+        default='validation/main/loss', type=str, nargs='?',
         help="Value to monitor to trigger an early stopping of the training"),
     "patience": dict(default=3, type=int, nargs='?', help="Number of epochs to wait without improvement before stopping the training"),
     "grad-clip": dict(default=5, type=float, help='Gradient norm threshold to clip'),
@@ -162,19 +156,8 @@ CONFIG = {
     "wpe-delay": dict(type=int, default=3, help=''),
     "use-dnn-mask-for-wpe": dict(type=strtobool, default=False, help='Use DNN to estimate the power spectrogram. This option is experimental.'),
 
-    # Beamformer
-    "use-beamformer": dict(type=strtobool, default=True, help=''),
-    "btype": dict(
-        default='blstmp', type=str, choices=AVAILABLE_E2E_RNNS,
-        help='Type of encoder network architecture of the mask estimator for Beamformer.'),
-    "blayers": dict(type=int, default=2, help=''),
-    "bunits": dict(type=int, default=300, help=''),
-    "bprojs": dict(type=int, default=300, help=''),
-    "badim": dict(type=int, default=320, help=''),
-    "bnmask": dict(type=int, default=2, help='Number of beamforming masks, default is 2 for [speech, noise].'),
-    "ref-channel": dict(type=int, default=-1, help='The reference channel used for beamformer. By default, the channel is estimated by DNN.'),
-
 }
+
 
 def get_parser(parser=None, required=True):
     """Get default arguments."""
@@ -243,13 +226,16 @@ def main(command_args):
         char_list = [entry.decode('utf-8').split(' ')[0]
                      for entry in dictionary]
         char_list.insert(0, '<blank>')
-        char_list.append('<eos>')
+        char_list.append('<eos>')  # FIXME: <eos> here vs </s> in w2v_train
         args.char_list = char_list
     else:
         args.char_list = None
 
     # recog
-    from espnet.w2v.w2v import recog
+    if args.task == "word":
+        from espnet.w2v.w2v import recog
+    else:
+        from espnet.w2b.w2b import recog
 
     recog(args)
 
