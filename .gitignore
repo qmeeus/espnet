@@ -69,3 +69,4 @@ tools/PESQ*
 tools/hts_engine_API*
 tools/open_jtalk*
 tools/pyopenjtalk*
+tools/activate_python.sh

@@ -3,14 +3,14 @@
 #   -> Move to $PROJECT_ROOT/utils 
 #   -> Call with `source utils/env.sh` $USER_DIR
 
-USER_DIR="$(dirname $0)"
-PROJECT_ROOT="/esat/spchdisk/scratch/qmeeus/repos/espnet"
-KALDI_ROOT=$PROJECT_ROOT/tools/kaldi
+export PATH=$PWD/utils/:$KALDI_ROOT/tools/openfst/bin:$KALDI_ROOT/tools/sctk/bin:$PWD:$PATH
+[ ! -f $KALDI_ROOT/tools/config/common_path.sh ] && echo >&2 "The standard file $KALDI_ROOT/tools/config/common_path.sh is not present -> Exit!" && exit 1
+. $KALDI_ROOT/tools/config/common_path.sh
+export LC_ALL=C
 
-# Setup kaldi environment
-if [ -f $KALDI_ROOT/tools/env.sh ]; then
-  . $KALDI_ROOT/tools/env.sh
-fi
+export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:$MAIN_ROOT/tools/chainer_ctc/ext/warp-ctc/build
+. $MAIN_ROOT/tools/activate_python.sh
+export PATH=$MAIN_ROOT/utils:$MAIN_ROOT/espnet/bin:$PATH
 
 # Add kaldi stuff to the path
 export PATH=$USER_DIR/utils/:$KALDI_ROOT/tools/openfst/bin:$KALDI_ROOT/tools/sctk/bin:$USER_DIR:$PATH
