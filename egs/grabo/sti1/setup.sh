@@ -10,7 +10,7 @@ export CUDA_PATH=$CUDA_HOME
 
 CONDA_HOME=/users/spraak/qmeeus/spchdisk/bin/anaconda3
 CONDA_INIT=$CONDA_HOME/etc/profile.d/conda.sh
-CONDA_ENV=espnet
+CONDA_ENV=pytorch-gpu
 source $CONDA_INIT
 echo "Activate conda environment $CONDA_ENV"
 conda activate $CONDA_ENV

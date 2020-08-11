@@ -7,9 +7,16 @@ from pathlib import Path
 import h5py
 from logger import setup
 from time import time
+from tqdm import tqdm
+import subprocess
 
 """
 Usage:
+    python local/RAW_encode_sentences.py $(readlink -f ../../grabo/sti1/data/grabo/text) \
+        --gpu 0 --jsonfiles dump/grabo_all/deltafalse/data_char.json \
+        --pretrained-model /esat/spchdisk/scratch/qmeeus/repos/transformers/examples/language-modeling/output/distilbert/checkpoint-134000 \
+        --output-file vectors/target_vectors_bert_dutch_grabo_v2.h5
+
     python local/RAW_encode_sentences.py data/CGN_ALL/text \
         --gpu 0 --jsonfiles dump/CGN_*/deltafalse/data_unigram_25000.*.json
 
@@ -20,11 +27,6 @@ Usage:
 """
 
 class Encoder:
-
-    # LOADER = "hub"
-    # PRETRAINED_MODEL =  f"pytorch/fairseq/xlmr.base"
-    # OUTPUT_FILE = Path(f"vectors/target_vectors_xlmr_base.h5").absolute()
-    # JSON_PREFIX = "data_vectors_xlmr"
 
     LOADER = "huggingface_bert"
     MODEL_BASE_CLASS = "BertModel"
@@ -65,7 +67,7 @@ class Encoder:
         self.configure_model(self.model, self.device)
         self.jsonfiles = jsonfiles
         self.json_prefix = json_prefix
-        self.logger.info(f"Setting to {self.output_file}")
+        self.logger.info(f"Create {self.output_file.parent} if it does not already exist")
         os.makedirs(self.output_file.parent, exist_ok=True)
 
     def load_pretrained_model(self, model_string):
@@ -75,14 +77,7 @@ class Encoder:
         model = AutoModel.from_pretrained(model_string, config=config)
         return tokenizer, model
 
-    def _load_pretrained_model(self, model_string):
-        from transformers import BertTokenizer, BertModel
-        tokenizer = BertTokenizer.from_pretrained(model_string)
-        model = BertModel.from_pretrained(model_string)
-        return tokenizer, model
-
     def load_sentences_from_file(self, filename):
-        self.logger.info(f"Loading sentences from {filename}")
         with open(filename) as txtfile:
             yield from map(
                 lambda t: (t[0], self.extract_features(t[1])), map(
@@ -93,32 +88,35 @@ class Encoder:
 
     def __call__(self, sentences):
 
-        self.logger.info("Encoding sentences")
+        self.logger.info(f"Encoding sentences in {sentences} to {self.output_file}")
         t0 = time()
-        shapes = {}
+        self._shapes = {}
         with h5py.File(self.output_file, 'w') as h5_file:
-            for uttid, feats in self.load_sentences_from_file(sentences):
+            for uttid, feats in tqdm(
+                self.load_sentences_from_file(sentences), total=self.line_count(sentences)
+            ):
+                
                 h5_file.create_dataset(uttid, data=feats, compression="gzip", compression_opts=9)
-                shapes[uttid] = feats.shape
+                self._shapes[uttid] = feats.shape
         
         t1 = time()
         self.logger.info(f"Sentences encoding completed in {t1 - t0:.2f}s")
 
-        for filename in self.jsonfiles:
+        for filename in tqdm(self.jsonfiles):
 
             parent, name = filename.parent, filename.name
             new_file = parent / ".".join([self.json_prefix, *name.split(".")[1:]])
             self.logger.info(f"Processing {filename} to {new_file}")
             with open(filename) as old, open(new_file, 'w') as new:
                 json.dump({"utts": dict(map(
-                    self.update_item(shapes),
+                    self.update_item(),
                     json.load(old)["utts"].items()
                 ))}, new, indent=4)
 
         t2 = time()
-        self.logger.info(f"Finished processing all files in {t2 - t1:.2f}s (total={t2-t0:.2f}s)")
+        self.logger.info(f"Finished processing all files in {t2-t1:.2f}s (total={t2-t0:.2f}s)")
 
-    def update_item(self, shapes):
+    def update_item(self):
         def _update_item(item):
             uttid, item = item
             output = item["output"][0]
@@ -127,7 +125,7 @@ class Encoder:
                 "text": item["output"][0]["text"],
                 "feat": f"{self.output_file}:{uttid}",
                 "filetype": "hdf5",
-                "shape": shapes[uttid]
+                "shape": self._shapes[uttid]
             }
             return uttid, item
         return _update_item
@@ -152,11 +150,31 @@ class Encoder:
 
     @staticmethod
     def batches(iterable, bs=128):
+        # TODO: process sentences by batches: 
+        # TODO: -> how to manage variable lengths without too much overhead?
+        # TODO: IDEA batch by length with "max_batch_size" argument
         l = len(iterable)
         for i in range(0, l, bs):
             yield iterable[i:min(l, i + bs)]
 
+    @staticmethod
+    def line_count(filename):
+        return int(subprocess.check_output(['wc', '-l', filename]).split()[0])
+
+    ### BACKUP PRETRAINED BERT
+
+    # def _load_pretrained_model(self, model_string):
+    #     from transformers import BertTokenizer, BertModel
+    #     tokenizer = BertTokenizer.from_pretrained(model_string)
+    #     model = BertModel.from_pretrained(model_string)
+    #     return tokenizer, model
+
     ### BACKUP PYTORCH'S HUB
+
+    # LOADER = "hub"
+    # PRETRAINED_MODEL =  f"pytorch/fairseq/xlmr.base"
+    # OUTPUT_FILE = Path(f"vectors/target_vectors_xlmr_base.h5").absolute()
+    # JSON_PREFIX = "data_vectors_xlmr"
 
     # def load_pretrained_model(self, model_string):
     #     model = torch.hub.load(*self.parse_model_string(model_string))

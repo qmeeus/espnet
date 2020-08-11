@@ -3,9 +3,9 @@ import time
 import numpy as np
 import pandas as pd
 import logging
+import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
-from enum import Enum
 from typing import List, Optional, Union
 from filelock import FileLock
 
@@ -14,63 +14,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data.dataset import Dataset
 
-# from transformers import InputFeatures, 
 from transformers import PreTrainedTokenizer, DataProcessor
 from transformers.file_utils import is_tf_available, is_torch_available
+from data_utils import Split, TextExample, TextFeatures, GraboTarget
+
 
 logger = logging.getLogger(__name__)
-
-
-class Split(Enum):
-    train = "train"
-    dev = "dev"
-    test = "test"
-
-
-@dataclass
-class InputExample:
-    """
-    A single training/test example for simple sequence classification.
-    Args:
-        guid: Unique id for the example.
-        input_text: string. The untokenized text of the first sequence. For single
-            sequence tasks, only this sequence must be specified.
-        target: list of int: a vector of 1s and 0s.
-    """
-
-    guid: str
-    input_text: str
-    labels: List[int]
-
-    def to_json_string(self):
-        """Serializes this instance to a JSON string."""
-        return json.dumps(dataclasses.asdict(self), indent=2) + "\n"
-
-
-@dataclass(frozen=True)
-class InputFeatures:
-    """
-    A single set of features of data.
-    Property names are the same names as the corresponding inputs to a model.
-    Args:
-        input_ids: Indices of input sequence tokens in the vocabulary.
-        attention_mask: Mask to avoid performing attention on padding token indices.
-            Mask values selected in ``[0, 1]``:
-            Usually  ``1`` for tokens that are NOT MASKED, ``0`` for MASKED (padded) tokens.
-        token_type_ids: (Optional) Segment token indices to indicate first and second
-            portions of the inputs. Only some models use them.
-        label: (Optional) Label corresponding to the input. Int for classification problems,
-            float for regression problems.
-    """
-
-    input_ids: List[int]
-    attention_mask: Optional[List[int]] = None
-    token_type_ids: Optional[List[int]] = None
-    labels: Optional[List[int]] = None
-
-    def to_json_string(self):
-        """Serializes this instance to a JSON string."""
-        return json.dumps(dataclasses.asdict(self)) + "\n"
 
 
 @dataclass
@@ -99,34 +48,10 @@ class TextDataTrainingArguments:
     task_name: str = field(default="sti", metadata={"help": "The task name (sti)"})
 
 
-class STIProcessor(DataProcessor):
-
-    ACTIONS = [
-        'approach', 'grab', 'lift', 'move_abs', 'move_rel', 
-        'pointer', 'turn_abs', 'turn_rel'
-    ]
-    
-    TEXT_COLUMN = "text"
-    LABELS_COLUMNS = [
-        "action", "throttle", "distance", "direction", "angle", 
-        "pos_x", "pos_y", "position", "state", "grabber"
-    ]
-
-    LABELS = [
-        'action_approach', 'action_grab', 'action_lift', 'action_move_abs', 
-        'action_move_rel', 'action_pointer', 'action_turn_abs', 'action_turn_rel', 
-        'throttle_fast', 'throttle_slow', 'distance_alot', 'distance_little', 
-        'distance_normal', 'direction_backward', 'direction_forward', 
-        'angle_east', 'angle_north', 'angle_south', 'angle_west', 
-        'pos_x_centerx', 'pos_x_left', 'pos_x_right', 
-        'pos_y_centery', 'pos_y_down', 'pos_y_up', 
-        'position_down', 'position_up', 'state_off', 'state_on', 
-        'grabber_close', 'grabber_open'
-    ]
-
+class GraboProcessor(DataProcessor):
 
     def __init__(self, labels=None, examples=None, verbose=False):
-        self.labels = self.LABELS
+        self.labels = GraboTarget.labels
         self.examples = [] if examples is None else examples
         self.verbose = verbose
 
@@ -137,6 +62,15 @@ class STIProcessor(DataProcessor):
         if isinstance(idx, slice):
             return STIProcessor(labels=self.labels, examples=self.examples[idx])
         return self.examples[idx]
+
+    def extract_target(self, data):
+        targets = pd.DataFrame(np.zeros((len(data), len(self.labels))), columns=self.labels)
+        targets.update(pd.get_dummies(data[GraboTarget.label_columns]))
+        labels = list(targets.columns)
+        return targets.astype(np.int64).values.tolist()
+
+
+class GraboProcessorTextInput(GraboProcessor):
         
     def get_train_examples(self, data_dir):
         """See base class."""
@@ -158,16 +92,13 @@ class STIProcessor(DataProcessor):
     ):
 
         data = (
-            pd.read_csv(file_name, usecols=[self.TEXT_COLUMN] + self.LABELS_COLUMNS)
+            pd.read_csv(file_name, usecols=["text"] + GraboTarget.label_columns)
             .drop_duplicates(ignore_index=True)
             .reset_index(drop=True)
         )
         
-        texts = data[self.TEXT_COLUMN]
-        targets = pd.DataFrame(np.zeros((len(texts), len(self.LABELS))), columns=self.LABELS)
-        targets.update(pd.get_dummies(data[self.LABELS_COLUMNS]))
-        labels = list(targets.columns)
-        targets = targets.astype(np.int64).values.tolist()
+        texts = data["text"]
+        targets = self.extract_targets(data)
         ids = data.index
 
         return self.add_examples(
@@ -181,7 +112,6 @@ class STIProcessor(DataProcessor):
         targets=None,
         labels=None,
         ids=None,
-        overwrite_labels=False,
         overwrite_examples=False
     ):
 
@@ -193,17 +123,11 @@ class STIProcessor(DataProcessor):
             targets = [None] * len(texts)
         examples = []
         for text, target, guid in zip(texts, targets, ids):
-            examples.append(InputExample(
+            examples.append(TextExample(
                 guid=guid, 
                 input_text=text,
-                labels=target
+                label=target
             ))
-
-        # Update labels
-        if labels and overwrite_labels:
-            self.labels = labels
-        else:
-            self.labels = list(set(self.labels).union(labels))
 
         # Update examples
         if overwrite_examples:
@@ -223,7 +147,7 @@ class STIProcessor(DataProcessor):
         return_tensors=None,
     ):
         """
-        Convert examples in a list of ``InputFeatures``
+        Convert examples in a list of ``TextFeatures``
         Args:
             tokenizer: Instance of a tokenizer that will tokenize the examples
             max_length: Maximum example length
@@ -234,8 +158,8 @@ class STIProcessor(DataProcessor):
                 actual values)
         Returns:
             If the ``examples`` input is a ``tf.data.Dataset``, will return a ``tf.data.Dataset``
-            containing the task-specific features. If the input is a list of ``InputExamples``, will return
-            a list of task-specific ``InputFeatures`` which can be fed to the model.
+            containing the task-specific features. If the input is a list of ``TextExamples``, will return
+            a list of task-specific ``TextFeatures`` which can be fed to the model.
         """
         if max_length is None:
             max_length = tokenizer.max_len
@@ -283,12 +207,12 @@ class STIProcessor(DataProcessor):
                 logger.info("guid: %s" % (example.guid))
                 logger.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
                 logger.info("attention_mask: %s" % " ".join([str(x) for x in attention_mask]))
-                logger.info(f"target shape: {example.labels.shape}")
+                logger.info(f"target shape: {example.label.shape}")
 
-            features.append(InputFeatures(
+            features.append(TextFeatures(
                 input_ids=input_ids, 
                 attention_mask=attention_mask, 
-                labels=example.labels
+                labels=example.label
             ))
 
         if return_tensors is None:
@@ -328,7 +252,7 @@ class TextDataset(Dataset):
 
     args: TextDataTrainingArguments
     output_mode: str
-    features: List[InputFeatures]
+    features: List[TextFeatures]
 
     def __init__(
         self,
@@ -339,7 +263,7 @@ class TextDataset(Dataset):
         cache_dir: Optional[str] = None,
     ):
         self.args = args
-        self.processor = STIProcessor()
+        self.processor = GraboProcessorTextInput()
         self.output_mode = "classification"
         if isinstance(mode, str):
             try:
@@ -403,15 +327,11 @@ class TextDataset(Dataset):
     def __len__(self):
         return len(self.features)
 
-    def __getitem__(self, i) -> InputFeatures:
+    def __getitem__(self, i) -> TextFeatures:
         return self.features[i]
 
     def get_labels(self):
         return self.label_list
-
-    def collate(self, batch):
-        import ipdb; ipdb.set_trace()
-        return self[batch]
 
 
 if __name__ == "__main__":
@@ -421,95 +341,8 @@ if __name__ == "__main__":
     filename = "/esat/spchdisk/scratch/qmeeus/repos/espnet/egs/grabo/sti1/data/grabo/target.csv"
 
     tokenizer = DistilBertTokenizer.from_pretrained(model_path)
-    processor = STIProcessor()
+    processor = GraboProcessorTextInput()
     processor.add_examples_from_csv(filename)
     train_set = processor.get_features(tokenizer, return_tensors="pt")
     import ipdb; ipdb.set_trace()
     print(processor)
-
-
-"""
-class Dataset:
-
-    TRAIN_SIZE = .7
-    VALID_SIZE = .1
-    TEST_SIZE = .2
-
-    LABELS = {
-        "throttle": ["fast", "slow"],
-        "distance": ["alot", "litte", "normal"],
-        "direction": ["backward", "forward"],
-        "angle": ["north", "south", "west", "east"],
-        "pos_x": ["center_x", "left", "right"],
-        "pos_y": ["center_y", "up", "down"],
-        "state": ["on", "off"],
-        "grabber": ["open", "close"]
-    }
-
-    ACTIONS = [
-        "move_rel",
-        "turn_rel",
-        "turn_abs",
-        "move_abs",
-        "approach",
-        "lift",
-        "pointer",
-        "grab"
-    ]
-
-    @classmethod
-    def add_arguments(cls, parser):
-        parser.add_argument_group("Data")
-        parser.add_argument("data", type=Path)
-        parser.add_argument('--vocab', type=Path, required=True)
-        parser.add_argument("--train-size", type=float, default=cls.TRAIN_SIZE)
-        parser.add_argument("--valid-size", type=float, default=cls.VALID_SIZE)
-        parser.add_argument("--test-size", type=float, default=cls.TEST_SIZE)
-        return parser
-
-    def __init__(self, data, vocab, train_size=TRAIN_SIZE, valid_size=VALID_SIZE, test_size=TEST_SIZE):
-        data = pd.read_csv(data, usecols=range(2,14)).drop_duplicates(ignore_index=True)
-
-        with open(vocab) as f:
-            self.vocab = list(map(str.strip, f.readlines()))
-
-        original_size = len(data)
-        data = data.loc[
-            data["text"].map(lambda s: all(token in self.vocab for token in s.split()))
-        ].copy()
-
-        self.n_samples = len(data)
-        print(f"Dropped {self.n_samples - original_size} sentences with unknown words")
-        self.x_dim = len(self.vocab)
-        self.y1_dim = len(self.ACTIONS)
-        self.y2_dim = sum(map(len, LABELS.values())) + len(LABELS)
-
-        self.X = data["text"].map(self.encode_sentence).values
-        self.y1 = data["action"].map(self.ACTIONS.index).values
-        self.y2 = np.stack(
-            data.iloc[:, 3:-2].apply(self.create_instruction_vector, axis=1).to_list(),
-            axis=0
-        )
-
-        train_idx, self.test_idx = train_test_split(
-            np.arange(self.n_samples), test_size=test_size
-        )
-
-        self.train_idx, self.valid_idx = train_test_split(
-            train_idx, test_size=valid_size/train_size
-        )
-
-    def encode_sentence(self, sentence):
-        tokens = sentence.split()
-        return np.array([self.vocab.index(token) for token in tokens], dtype=np.int64)
-
-    def create_instruction_vector(self, row):
-        instructions = np.zeros((self.y2_dim,), np.int64)
-        cur = 0
-        for name, values in LABELS.items():
-            instr = row[name]
-            index = cur + (values.index(instr) + 1 if instr else 0)
-            instruction[index] = 1
-            cur += len(values) + 1
-        return instructions
-"""

@@ -5,9 +5,12 @@ import sys
 import numpy as np
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional
+from pathlib import Path
 
 import torch
 import torch.nn as nn
+
+from sklearn.metrics import classification_report
 
 from transformers import DistilBertModel, DistilBertTokenizer, DistilBertPreTrainedModel, DistilBertConfig
 from transformers import (
@@ -19,77 +22,40 @@ from transformers import (
 
 from transformers.data.metrics import simple_accuracy
 
-from text_dataset import TextDataTrainingArguments, TextDataset
-from model import IntentClassifier
+from vector_dataset import VectorDataTrainingArguments, VectorDataset
+from model import IntentClassifier, LSTMEncoder
 
 
 logger = logging.getLogger(__name__)
 
 
-
 @dataclass
-class ModelArguments:
-    """
-    Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
-    """
-
-    model_name_or_path: str = field(
-        metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
-    )
-    config_name: Optional[str] = field(
-        default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
-    )
-    tokenizer_name: Optional[str] = field(
-        default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
-    )
-    cache_dir: Optional[str] = field(
-        default=None, metadata={"help": "Where do you want to store the pretrained models downloaded from s3"}
-    )
+class Config:
+    output_dim = 23 + 8
+    input_dim = 100
+    seq_classif_dropout = 0.2
+    dim = 768
 
 
-
-class Speech2IntentModel(DistilBertPreTrainedModel):
+class Speech2IntentModel(nn.Module):
 
     def __init__(self, config):
-        super(Speech2IntentModel, self).__init__(config)
-        # self.n_actions = config.n_actions
-        # self.n_instructions = config.n_instructions
+        super(Speech2IntentModel, self).__init__()
 
-        self.distilbert = DistilBertModel(config)
-        self.distilbert.requires_grad_ = not config.freeze_bert
         self.classifier = IntentClassifier(
             input_dim=config.dim, 
             output_dim=config.output_dim,
-            # n_actions=config.n_actions, 
-            # n_instructions=config.n_instructions, 
             dropout_rate=config.seq_classif_dropout
         )
         
-        self.init_weights()
-
-    def forward(self, input_ids=None,
+    def forward(self, input_vectors=None,
         attention_mask=None,
-        head_mask=None,
-        inputs_embeds=None,
         labels=None,
-        # actions=None,
-        # instructions=None,
-        output_attentions=None,
-        output_hidden_states=None,
     ):
 
-        distilbert_output = self.distilbert(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            head_mask=head_mask,
-            inputs_embeds=inputs_embeds,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-        )
-
-        hidden_state = distilbert_output[0]  # (bs, seq_len, dim)
-        outputs = self.classifier(hidden_state[:, 0], labels=labels)
-        return outputs + distilbert_output[1:]
+        input_lengths = attention_mask.sum(-1)
+        outputs = self.classifier(input_vectors[:, 0], labels=labels)
+        return outputs
 
 
 
@@ -106,26 +72,19 @@ def data_collator(features):
             if isinstance(v, torch.Tensor):
                 batch[k] = torch.stack([f[k] for f in features])
             else:
-                batch[k] = torch.tensor([f[k] for f in features], dtype=torch.long)
+                batch[k] = torch.tensor([f[k] for f in features], dtype=torch.float32)
 
     return batch
 
-
-def build(model_name_or_path):
-    config = DistilBertConfig.from_pretrained(model_name_or_path)
-    # config.n_actions = 8
-    # config.n_instructions = 23
-    config.output_dim = 23 + 8
-    config.freeze_bert = True
-    tokenizer = DistilBertTokenizer.from_pretrained(model_name_or_path)
-    model = Speech2IntentModel.from_pretrained(model_name_or_path, config=config)
-    return tokenizer, model
+def sigmoid(x):
+    return (1 + np.exp(-x)) ** (-1)
 
 
 def build_compute_metrics_fn():
     def compute_metrics_fn(p):
         preds = (p.predictions >= .5).astype(np.int64)
-        return {'acc': simple_accuracy(preds, p.label_ids)}
+        micro_acc = sum((preds[i] == p.label_ids[i]).all() for i in range(len(preds))) / len(preds)
+        return {'macro_acc': simple_accuracy(preds, p.label_ids), 'micro_acc': micro_acc}
     return compute_metrics_fn
 
 
@@ -134,14 +93,14 @@ def main():
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
-    parser = HfArgumentParser((ModelArguments, TextDataTrainingArguments, TrainingArguments))
+    parser = HfArgumentParser((VectorDataTrainingArguments, TrainingArguments))
 
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
         # let's parse it to get our arguments.
-        model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
+        data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:
-        model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+        data_args, training_args = parser.parse_args_into_dataclasses()
 
     if (
         os.path.exists(training_args.output_dir)
@@ -177,29 +136,27 @@ def main():
     # Distributed training:
     # The .from_pretrained methods guarantee that only one local process can concurrently
     # download model & vocab.
-    tokenizer, model = build(model_args.model_name_or_path)
+    model = Speech2IntentModel(config=Config())
+    print(model)
 
     # Get datasets
     train_dataset = (
-        TextDataset(data_args, tokenizer=tokenizer, cache_dir=model_args.cache_dir) if training_args.do_train else None
+        VectorDataset(data_args) if training_args.do_train else None
     )
-    eval_dataset = (
-        TextDataset(data_args, tokenizer=tokenizer, mode="dev", cache_dir=model_args.cache_dir)
-        if training_args.do_eval
-        else None
-    )
+
     test_dataset = (
-        TextDataset(data_args, tokenizer=tokenizer, mode="test", cache_dir=model_args.cache_dir)
+        VectorDataset(data_args, mode="test")
         if training_args.do_predict
         else None
     )
 
+    training_args.save_steps = 0
     # Initialize our Trainer
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
+        eval_dataset=test_dataset,
         compute_metrics=build_compute_metrics_fn(),
         # prediction_loss_only=True,
         data_collator=data_collator
@@ -210,11 +167,11 @@ def main():
         trainer.train(
             # model_path=model_args.model_name_or_path if os.path.isdir(model_args.model_name_or_path) else None
         )
-        trainer.save_model()
+        # trainer.save_model()
         # For convenience, we also re-save the tokenizer to the same directory,
         # so that you can share your model easily on huggingface.co/models =)
-        if trainer.is_world_master():
-            tokenizer.save_pretrained(training_args.output_dir)
+        # if trainer.is_world_master():
+            # tokenizer.save_pretrained(training_args.output_dir)
 
     # Evaluation
     eval_results = {}
@@ -222,23 +179,23 @@ def main():
         logger.info("*** Evaluate ***")
 
         # Loop to handle MNLI double evaluation (matched, mis-matched)
-        eval_datasets = [eval_dataset]
+        test_datasets = [test_dataset]
         # if data_args.task_name == "mnli":
         #     mnli_mm_data_args = dataclasses.replace(data_args, task_name="mnli-mm")
         #     eval_datasets.append(
         #         GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, mode="dev", cache_dir=model_args.cache_dir)
         #     )
 
-        for eval_dataset in eval_datasets:
+        for test_dataset in test_datasets:
             # trainer.compute_metrics = build_compute_metrics_fn(eval_dataset.args.task_name)
-            eval_result = trainer.evaluate(eval_dataset=eval_dataset)
+            eval_result = trainer.evaluate(eval_dataset=test_dataset)
 
-            output_eval_file = os.path.join(
-                training_args.output_dir, f"eval_results_{eval_dataset.args.task_name}.txt"
+            output_eval_file = Path(
+                training_args.output_dir, f"eval_results_{test_dataset.args.task_name}.txt"
             )
             if trainer.is_world_master():
                 with open(output_eval_file, "w") as writer:
-                    logger.info("***** Eval results {} *****".format(eval_dataset.args.task_name))
+                    logger.info("***** Eval results {} *****".format(test_dataset.args.task_name))
                     for key, value in eval_result.items():
                         logger.info("  %s = %s", key, value)
                         writer.write("%s = %s\n" % (key, value))
@@ -248,30 +205,48 @@ def main():
     if training_args.do_predict:
         logging.info("*** Test ***")
         test_datasets = [test_dataset]
-        if data_args.task_name == "mnli":
-            mnli_mm_data_args = dataclasses.replace(data_args, task_name="mnli-mm")
-            test_datasets.append(
-                GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, mode="test", cache_dir=model_args.cache_dir)
-            )
 
         for test_dataset in test_datasets:
-            predictions = trainer.predict(test_dataset=test_dataset).predictions
-            if output_mode == "classification":
-                predictions = np.argmax(predictions, axis=1)
+            predictions = trainer.predict(test_dataset=test_dataset)
+            probabilities = sigmoid(predictions.predictions)
 
-            output_test_file = os.path.join(
+            np.save(
+                Path(training_args.output_dir, f"test_results_{test_dataset.args.task_name}.npy"), 
+                probabilities
+            )
+
+            hard_preds = (probabilities > 0.5).astype(np.int64)
+
+            output_test_file = Path(
                 training_args.output_dir, f"test_results_{test_dataset.args.task_name}.txt"
             )
             if trainer.is_world_master():
-                with open(output_test_file, "w") as writer:
-                    logger.info("***** Test results {} *****".format(test_dataset.args.task_name))
-                    writer.write("index\tprediction\n")
-                    for index, item in enumerate(predictions):
-                        if output_mode == "regression":
-                            writer.write("%d\t%3.3f\n" % (index, item))
-                        else:
-                            item = test_dataset.get_labels()[item]
-                            writer.write("%d\t%s\n" % (index, item))
+                with open(output_test_file, "w") as output_test_file:
+                    logger.info(f"***** Test results {test_dataset.args.task_name} *****")
+                    output_test_file.write("index\tprediction\n")
+                    for index, vector in enumerate(hard_preds):
+                        item = " ".join([
+                            test_dataset.get_labels()[i].split('_', maxsplit=1)[-1]
+                            for i, item in enumerate(vector) if item
+                        ])
+
+                        output_test_file.write("%d\t%s\n" % (index, item))
+
+            score_file = Path(training_args.output_dir, f"prediction_scores_{test_dataset.args.task_name}.txt")
+            with open(score_file, 'w') as score_file:
+                score_file.writelines([
+                    f"{metric}\t{value}\n" for metric, value in build_compute_metrics_fn()(predictions).items()
+                ])
+
+            report_file = Path(training_args.output_dir, f"classification_report_{test_dataset.args.task_name}.txt")
+            with open(report_file, 'w') as report_file:
+                report_file.write(classification_report(
+                    predictions.label_ids, 
+                    hard_preds, 
+                    target_names=test_dataset.get_labels(),
+                    digits=5,
+                    zero_division=0
+                ))
 
     return eval_results
 
