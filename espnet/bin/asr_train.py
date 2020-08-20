@@ -254,14 +254,16 @@ def main(cmd_args):
 
     # load dictionary for debug log
     if args.dict is not None:
-        with open(args.dict, 'rb') as f:
-            dictionary = f.readlines()
-        char_list = [entry.decode('utf-8').split(' ')[0]
-                     for entry in dictionary]
-        char_list.insert(0, '<blank>')
-        if "</s>" not in char_list:
-            char_list.append('</s>')
+        with open(args.dict, 'r', encoding='utf-8') as f:
+            char_list = list(map(str.strip, f.readlines()))
+
+        blank, eos = args.sym_blank, '</s>'
+        if blank not in char_list:
+            char_list.insert(0, blank)
+        if eos not in char_list:
+            char_list.append(eos)
         args.char_list = char_list
+
     else:
         args.char_list = None
 
