@@ -27,7 +27,6 @@ from espnet.asr.pytorch_backend.converter import CustomConverter
 from espnet.asr.pytorch_backend.trainer import CustomTrainer
 
 from espnet.nets.asr_interface import ASRInterface
-# from espnet.transform.spectrogram import IStft
 from espnet.transform.transformation import Transformation
 from espnet.utils.cli_writers import file_writer_helper
 from espnet.utils.dataset import ChainerDataLoader
@@ -51,8 +50,13 @@ DEBUG_MODEL = False
 
 
 def count_parameters(model):
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
-
+    n_params, n_trainable = 0, 0
+    for p in model.parameters():
+        np = p.numel()
+        n_params += np
+        if p.requires_grad:
+            n_trainable += np
+    return n_params, n_trainable
 
 def build_model(list_input_dim, output_dim, args):
 
@@ -86,7 +90,8 @@ def display_model(model):
     for line in str(model).split("\n"):
         logging.info(line)
 
-    logging.info(f"# Params: {count_parameters(model):,}")
+    n_params, n_trainable = count_parameters(model)
+    logging.info(f"# Params: {n_params / 10**6:.1f}M (trainable: {n_trainable / 10**6:.1f}M)")
 
 
 def get_optimizer(model, args, reporter):
