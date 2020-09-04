@@ -42,6 +42,7 @@ for dataset in $(ls $test_features/${json_prefix}.?.json); do
       --outdir $outdir/results \
       --debugmode ${debugmode} \
       --dict ${dict} \
+      --ctc_type builtin \
       --debugdir $outdir \
       --verbose $verbose \
       --enc-init $resume \

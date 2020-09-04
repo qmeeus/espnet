@@ -39,8 +39,9 @@ setup_target(){
       json_prefix="data_pos_300"
       ;;
     "vector")
-      dict="none"
-      json_prefix="data_vectors_bert_dutch"
+      dict=data/lang_unigram/${train_set}_unigram_${vocab_size}_units.txt
+      # json_prefix="data_vectors_bert_dutch"
+      json_prefix="data_unigram_${vocab_size}"
       SCRIPT=w2v_train.py
       model_class=espnet.nets.pytorch_backend.e2e_xlmr_transformer:E2E
       ;;
@@ -85,7 +86,7 @@ mkdir -p $output_dir
     --verbose $verbose \
     --resume ${resume} \
     $OPTIONS \
-    | tee $output_dir/train.log
+     | tee $output_dir/train.log
 
 )  3>&1 1>&2 2>&3 | tee $output_dir/train.err
 

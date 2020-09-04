@@ -1,0 +1,19 @@
+Universe            = vanilla
+
+NiceUser            = true
+RequestCpus         = 1
+RequestMemory       = 8G
++RequestWallTime    = 86400
+Request_GPUs        = 1
+Requirements        = ( CUDAGlobalMemoryMB > 10000 )
+
+Initialdir          = /esat/spchdisk/scratch/qmeeus/repos/espnet/egs/cgn/asr1 
+Executable          = train.sh 
+Arguments           = --train_config conf/train/$(tag).yaml --target wordpiece --vocab-size 5000 --dataset_tag mono --tag $(tag) --output_dir exp/train_unigram_5000_mono/$(tag)/pretrain --ngpu 1
+
+Notification        = Complete
+Log                 = exp/train_unigram_5000_mono/$(tag)/pretrain/condor.log
+Output              = exp/train_unigram_5000_mono/$(tag)/pretrain/condor.out 
+Error               = exp/train_unigram_5000_mono/$(tag)/pretrain/condor.err
+
+Queue tag from tags.txt
