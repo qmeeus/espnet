@@ -78,14 +78,12 @@ def recog(options):
     with torch.no_grad(), h5py.File(f"{dump_dir}/predictions.h5", "w") as h5f:
 
         lengths = {}
-
         for i, (batch,) in enumerate(iterator):
             X, Xlens = batch["input1"], batch["input1_length"]
-            y, ylens = batch["target1"], batch["target1_length"]            
             uttids = batch["uttid"]
-            X, Xlens, y, ylens = _recursive_to((X, Xlens, y, ylens), device)
+            X, Xlens = _recursive_to((X, Xlens), device)
 
-            loss, preds, pred_mask = model.predict(X, Xlens, y, ylens)
+            preds, pred_mask = model.predict(X, Xlens)
             pred_lengths = (~pred_mask[:, -1:, :]).sum(-1).squeeze(-1).tolist()
 
             for i, uttid in enumerate(uttids):
