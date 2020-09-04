@@ -8,6 +8,7 @@ from distutils.util import strtobool
 
 import logging
 import math
+import numpy as np
 
 import torch
 
@@ -63,7 +64,6 @@ class E2E(ASRInterface, torch.nn.Module):
         group.add_argument('--transformer-length-normalized-loss', default=True, type=strtobool,
                            help='normalize loss by length')
         group.add_argument('--dropout-rate', default=0.0, type=float, help='Dropout rate')
-
         # Encoder
         group.add_argument('--elayers', default=4, type=int,
                            help='Number of encoder layers (for shared recognition part in multi-speaker asr mode)')
@@ -79,6 +79,8 @@ class E2E(ASRInterface, torch.nn.Module):
                            help='Number of decoder layers')
         group.add_argument('--dunits', default=320, type=int,
                            help='Number of decoder hidden units')
+        group.add_argument('--sampling-probability', default=0.0, type=float,
+                           help='Ratio of predicted labels fed back to decoder')
         return parser
 
     @property
@@ -94,6 +96,7 @@ class E2E(ASRInterface, torch.nn.Module):
         :param Namespace args: argument Namespace containing options
         """
         torch.nn.Module.__init__(self)
+        self.sampling_probability = args.sampling_probability
 
         self.encoder = self.build_encoder(idim, args)
         self.decoder = self.build_decoder(odim, args)
@@ -102,14 +105,12 @@ class E2E(ASRInterface, torch.nn.Module):
         
         # HACK: error prone: char_list can only be None when working with vectors
         if self.char_list:
-            try:
-                self.sos = self.eos = self.char_list.index("</s>")
-            except ValueError:
-                self.sos = self.eos = self.char_list.index("<eos>")
+            self.sos = self.eos = self.char_list.index("</s>")
             try: # HACK (temporary)
                 self.pad = self.char_list.index("<pad>")
             except ValueError:
                 self.pad = None
+            self.blank = self.char_list.index(args.sym_blank)
 
         self.odim = odim
         self.ignore_id = ignore_id
@@ -167,8 +168,15 @@ class E2E(ASRInterface, torch.nn.Module):
         )
 
     def build_ctc_layer(self, args):
-        if self.mtlalpha > 0.0:
-            return CTC(self.odim, args.adim, args.dropout_rate, ctc_type=args.ctc_type, reduce=True)
+        if self.mtlalpha == 0.0:
+            return
+        return CTC(
+            odim=self.odim, 
+            eprojs=args.adim, 
+            dropout_rate=args.dropout_rate, 
+            ctc_type=args.ctc_type, 
+            reduce=True
+        )
 
     def build_error_calculator(self, args):
         if args.report_cer or args.report_wer:
@@ -180,7 +188,7 @@ class E2E(ASRInterface, torch.nn.Module):
                 args.report_cer, args.report_wer
             )
 
-    def forward(self, xs_pad, ilens, ys_pad):
+    def forward(self, xs_pad, ilens, ys_pad, use_teacher_forcing=True):
         """E2E forward.
 
         :param torch.Tensor xs_pad: batch of padded source sequences (B, Tmax, idim)
@@ -193,23 +201,38 @@ class E2E(ASRInterface, torch.nn.Module):
         :return: accuracy in attention decoder
         :rtype: float
         """
+
+        bs, olen = ys_pad.size()
+
         # 1. forward encoder
         xs_pad = xs_pad[:, :max(ilens)]  # for data parallel
         src_mask = make_non_pad_mask(ilens.tolist()).to(xs_pad.device).unsqueeze(-2)
         hs_pad, hs_mask = self.encoder(xs_pad, src_mask)
-        self.hs_pad = hs_pad
 
         # 2. forward decoder
         ys_in_pad, ys_out_pad = add_sos_eos(ys_pad, self.sos, self.eos, self.ignore_id)
-        ys_mask = target_mask(ys_in_pad, self.ignore_id)
-        pred_pad, pred_mask = self.decoder(ys_in_pad, ys_mask, hs_pad, hs_mask)
-        self.pred_pad = pred_pad
 
+        if not use_teacher_forcing or np.random.rand() < self.sampling_probability:
+            logging.info("Using decoder's output as next step's input")
+            ys = ys_in_pad[:, :1]
+            pred_pad = torch.zeros((bs, olen + 1, self.decoder.output_dim)).type_as(xs_pad)
+            cache = None
+
+            for i in range(olen + 1):
+                
+                pred_mask = subsequent_mask(i+1).type_as(ys).unsqueeze(0).repeat(bs, 1, 1)
+                pred_pad[:, i, :], cache = self.decoder.forward_one_step(ys, pred_mask, hs_pad, cache)
+                ys = torch.cat([ys, pred_pad[:, i, :].argmax(-1, keepdim=True)], axis=1)
+
+        else:
+            ys_mask = target_mask(ys_in_pad, self.ignore_id)
+            pred_pad, pred_mask = self.decoder(ys_in_pad, ys_mask, hs_pad, hs_mask)
+            
         # 3. compute attention loss
         loss_att = self.criterion(pred_pad, ys_out_pad)
-        self.acc = th_accuracy(pred_pad.view(-1, self.odim), ys_out_pad,
-                               ignore_label=self.ignore_id)
+        acc = th_accuracy(pred_pad.view(-1, self.odim), ys_out_pad, ignore_label=self.ignore_id)
 
+        # 4. compute ctc loss
         # TODO(karita) show predicted text
         # TODO(karita) calculate these stats
         cer_ctc = None
@@ -233,31 +256,31 @@ class E2E(ASRInterface, torch.nn.Module):
         # copyied from e2e_asr
         alpha = self.mtlalpha
         if alpha == 0:
-            self.loss = loss_att
+            loss = loss_att
             loss_att_data = float(loss_att)
             loss_ctc_data = None
         elif alpha == 1:
-            self.loss = loss_ctc
+            loss = loss_ctc
             loss_att_data = None
             loss_ctc_data = float(loss_ctc)
         else:
-            self.loss = alpha * loss_ctc + (1 - alpha) * loss_att
+            loss = alpha * loss_ctc + (1 - alpha) * loss_att
             loss_att_data = float(loss_att)
             loss_ctc_data = float(loss_ctc)
 
-        loss_data = float(self.loss)
+        loss_data = float(loss)
         if loss_data < CTC_LOSS_THRESHOLD and not math.isnan(loss_data):
             self.reporter.report(
                 loss_ctc=loss_ctc_data,
                 loss_att=loss_att_data,
-                accuracy=self.acc,
+                accuracy=acc,
                 cer_ctc=cer_ctc,
                 cer=cer,
                 wer=wer,
                 loss=loss_data)
         else:
             logging.warning('loss (=%f) is not correct', loss_data)
-        return self.loss
+        return loss
 
     def scorers(self):
         """Scorers."""

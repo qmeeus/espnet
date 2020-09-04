@@ -14,6 +14,29 @@ import six
 import sys
 
 from itertools import groupby
+from operator import itemgetter
+
+
+def tokens2text(tokens, char_list, ignore_indices=(0, 1, -1), space_symbol="▁", return_sentence=True, is_ctc=False):
+    
+    def token2string(token): return char_list[int(token)]
+    def filter_token(token): return token not in ignore_indices
+
+    # Remove repeated tokens
+    if is_ctc:
+        tokens = map(itemgetter(0), groupby(tokens))
+
+    # Remove unwanted tokens
+    tokens = filter(filter_token, tokens)
+
+    # Map tokens to strings
+    tokens = map(token2string, tokens)
+    
+    if return_sentence:
+        # Create the sentence
+        return "".join(tokens).replace(space_symbol, " ")
+    
+    return list(tokens)
 
 
 def end_detect(ended_hyps, i, M=3, D_end=np.log(1 * np.exp(-10))):
@@ -157,14 +180,17 @@ class ErrorCalculator(object):
         """
         cers, char_ref_lens = [], []
         for i, y in enumerate(ys_hat):
-            y_hat = [x[0] for x in groupby(y)]
             y_true = ys_pad[i]
-            seq_hat, seq_true = [], []
-            for idx in y_hat:
-                idx = int(idx)
-                if idx != -1 and idx != self.idx_blank and idx != self.idx_space:
-                    seq_hat.append(self.char_list[int(idx)])
+            
+            seq_hat = tokens2text(
+                tokens=y,
+                char_list=self.char_list,
+                ignore_indices=(self.idx_blank, self.idx_space, -1),
+                return_sentence=False,
+                is_ctc=True
+            )
 
+            seq_true = []
             for idx in y_true:
                 idx = int(idx)
                 if idx != -1 and idx != self.idx_blank and idx != self.idx_space:

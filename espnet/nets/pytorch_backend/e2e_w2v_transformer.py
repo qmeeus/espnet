@@ -50,7 +50,6 @@ class E2E(BaseE2E):
         :param int odim: dimension of outputs
         :param Namespace args: argument Namespace containing options
         """
-        args.mtlalpha = 0.
         args.report_cer = args.report_wer = False
         super(E2E, self).__init__(idim, odim, args, ignore_id=-1)
 
@@ -198,6 +197,7 @@ class E2E(BaseE2E):
         if not math.isnan(loss):
             self.reporter.report(**metrics)
         else:
+            import ipdb; ipdb.set_trace()
             logging.debug('loss (=%f) is not correct', loss.item())
 
     def tokens_to_string(self, tokens):
