@@ -1,19 +1,16 @@
 # network architecture
 # encoder related
-elayers: 12
-eunits: 2048
+elayers: 4 
+eunits: 512 
 # decoder related
-dlayers: 6
-dunits: 2048
+dlayers: 2
+dunits: 512
 # attention related
-adim: 512 
-aheads: 8
-
-# hybrid CTC/attention
-mtlalpha: 0.4
+adim: 256 
+aheads: 4
 
 # minibatch related
-batch-size: 16 
+batch-size: 32 
 maxlen-in: 512  # if input length  > maxlen-in, batchsize is automatically reduced
 maxlen-out: 50 # if output length > maxlen-out, batchsize is automatically reduced
 
@@ -22,13 +19,13 @@ sortagrad: 0 # Feed samples from shortest to longest ; -1: enabled for all epoch
 opt: noam
 accum-grad: 4
 grad-clip: 5
-patience: 5
+patience: 3
 epochs: 100
 dropout-rate: 0.1
 
 # transformer specific setting
 backend: pytorch
-model-class: "espnet.nets.pytorch_backend.e2e_asr_transformer:E2E"
+model-class: "espnet.nets.pytorch_backend.e2e_w2v_transformer:E2E"
 transformer-input-layer: conv2d     # encoder architecture type
 transformer-lr: 10.0
 transformer-warmup-steps: 25000

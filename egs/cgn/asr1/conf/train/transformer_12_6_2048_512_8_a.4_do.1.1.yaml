@@ -32,10 +32,10 @@ model-class: "espnet.nets.pytorch_backend.e2e_asr_transformer:E2E"
 transformer-input-layer: conv2d     # encoder architecture type
 transformer-lr: 10.0
 transformer-warmup-steps: 25000
-transformer-attn-dropout-rate: 0.0
-transformer-length-normalized-loss: false
+transformer-attn-dropout-rate: 0.1
+transformer-length-normalized-loss: true 
 transformer-init: pytorch
 
-report-cer: false
-report-wer: false 
+report-cer: true
+report-wer: true 
 
