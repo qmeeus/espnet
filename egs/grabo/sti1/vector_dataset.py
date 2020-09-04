@@ -1,5 +1,6 @@
 import os
 import time
+import json
 import numpy as np
 import pandas as pd
 import logging
@@ -136,9 +137,6 @@ class STIProcessor(DataProcessor):
         self.examples = [] if examples is None else examples
         self.verbose = verbose
 
-        for split in ('train', 'dev', 'test'):
-            setattr(self, f'get_{split}_examples', lambda args: self.get_examples(args, split=split))
-
     def __len__(self):
         return len(self.examples)
 
@@ -150,6 +148,15 @@ class STIProcessor(DataProcessor):
     def get_examples(self, args, split='train'):
         ids_file = Path(args.data_dir, f"{split}.ids")
         return self.add_examples_from_csv(args.target_file, args.feature_file, ids_file)
+
+    def get_train_examples(self, args): 
+        self.get_examples(args, split="train")
+
+    def get_dev_examples(self, args): 
+        self.get_examples(args, split="dev")
+
+    def get_test_examples(self, args): 
+        self.get_examples(args, split="test")
 
     def add_examples_from_csv(
         self, target_file,
@@ -171,7 +178,7 @@ class STIProcessor(DataProcessor):
         ids = data.index
 
         with h5py.File(features_file, 'r') as h5f:
-            features = [h5f[key][()] for key in ids]
+            features = [h5f[key][()] for key in ids if key in h5f]
 
         return self.add_examples(
             features, targets=targets, ids=ids, labels=labels,

@@ -52,7 +52,6 @@ class Speech2IntentModel(nn.Module):
         attention_mask=None,
         labels=None,
     ):
-
         input_lengths = attention_mask.sum(-1)
         outputs = self.classifier(input_vectors[:, 0], labels=labels)
         return outputs
@@ -88,7 +87,7 @@ def build_compute_metrics_fn():
     return compute_metrics_fn
 
 
-def main():
+def main(config):
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
@@ -136,7 +135,7 @@ def main():
     # Distributed training:
     # The .from_pretrained methods guarantee that only one local process can concurrently
     # download model & vocab.
-    model = Speech2IntentModel(config=Config())
+    model = Speech2IntentModel(config=config)
     print(model)
 
     # Get datasets
@@ -253,8 +252,8 @@ def main():
 
 def _mp_fn(index):
     # For xla_spawn (TPUs)
-    main()
+    main(Config())
 
 
 if __name__ == "__main__":
-    main()
+    main(Config())

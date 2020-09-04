@@ -10,20 +10,20 @@ set -x
 set -u
 set -o pipefail
 
-data_dir=data/CGN_ALL
+data_dir=data/grabo_kaldi
 
 # =======================================================================================
 #                                  PRELIMINARIES
 # =======================================================================================
 if [ $stage -le 0  ]; then
   echo "stage 0: prepare the data"
-  python local/RAW_extract_annot_from_corex.py --drop-unknown --drop-overlapping
-  python local/RAW_prepare_cgn_annot.py \
-    --annot-file ${data_dir}/annotations.csv \
-    --file-list data/datafiles.csv \
-    --use-existing-annot \
-    --use-existing-file-registry
-  utils/validate_data_dir.sh --no-feats ${data_dir}
+#  python local/RAW_extract_annot_from_corex.py --drop-unknown --drop-overlapping
+#  python local/RAW_prepare_cgn_annot.py \
+#    --annot-file ${data_dir}/annotations.csv \
+#    --file-list data/datafiles.csv \
+#    --use-existing-annot \
+#    --use-existing-file-registry
+#  utils/validate_data_dir.sh --no-feats ${data_dir}
 fi
 
 if [ ${stop_stage} -le 0  ]; then
@@ -39,7 +39,7 @@ if [ ${stage} -le 1  ]; then
   fbankdir=fbank
   # Generate the fbank features; by default 80-dimensional fbanks with pitch on each frame
   steps/make_fbank_pitch.sh --cmd "$train_cmd" --nj 8 --write_utt2num_frames true \
-    ${data_dir} exp/make_fbank/CGN_ALL ${fbankdir}
+    ${data_dir} exp/make_fbank/grabo ${fbankdir}
 fi
 
 if [ ${stop_stage} -le 1  ]; then
@@ -48,19 +48,16 @@ if [ ${stop_stage} -le 1  ]; then
 fi
 
 # =======================================================================================
-#                               TRAIN / DEV / TEST
+#                                   CMVN STATS
 # =======================================================================================
 if [ ${stage} -le 2  ]; then
-  echo "stage 2: Dataset splits"
-  python local/RAW_split_subsets.py ${data_dir} --annot-file annotations.csv --prefix CGN
-  compute-cmvn-stats scp:data/CGN_train/feats.scp data/CGN_train/cmvn.ark
+  echo "stage 2: Stats"
+  compute-cmvn-stats scp:${data_dir}/feats.scp ${data_dir}/cmvn.ark
 
-  for subset in train valid test; do
-    feature_dir=${dumpdir}/CGN_${subset}/delta${do_delta}
-    mkdir -p $feature_dir
-    dump.sh --cmd "$train_cmd" --nj 8 --do_delta ${do_delta} \
-        data/CGN_${subset}/feats.scp data/CGN_train/cmvn.ark exp/dump_feats/${subset} ${feature_dir}
-  done
+  feature_dir=${dumpdir}/grabo/delta${do_delta}
+  mkdir -p $feature_dir
+  dump.sh --cmd "$train_cmd" --nj 8 --do_delta ${do_delta} \
+      ${data_dir}/feats.scp ${data_dir}/cmvn.ark exp/dump_feats/grabo ${feature_dir}
 fi
 
 if [ ${stop_stage} -le 2  ]; then
