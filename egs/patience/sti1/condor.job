@@ -1,0 +1,20 @@
+
+Universe            = vanilla
+
+NiceUser            = true
+RequestCpus         = 8
+RequestMemory       = 16G
++RequestWallTime    = 43200
+Request_GPUs        = 0
+Requirements        = 
+
+Initialdir          = /esat/spchdisk/scratch/qmeeus/repos/espnet/egs/patience/sti1 
+Executable          = /esat/spchdisk/scratch/qmeeus/bin/anaconda3/envs/espnet/bin/python  
+Arguments           = train_svm.py $(job) --njobs 8 --combine mean 
+
+Notification        = Complete
+Log                 = exp/condor_log/condor.$(ClusterId).$(ProcId).log
+Output              = exp/condor_log/condor.$(ClusterId).$(ProcId).out 
+Error               = exp/condor_log/condor.$(ClusterId).$(ProcId).err
+
+Queue job matching data/jobs/* 
