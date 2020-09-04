@@ -15,9 +15,11 @@ import sys
 import numpy as np
 
 from espnet.utils.cli_utils import strtobool, count_gpus
+from espnet.utils.io_utils import load_dictionary
 from espnet.utils.training.batchfy import BATCH_COUNT_CHOICES
 from espnet.utils.dynamic_import import dynamic_import
 from distutils.util import strtobool as strtobool_
+
 
 AVAILABLE_E2E_RNNS = [
     f"{front}{b}{cell}{p}"
@@ -87,6 +89,8 @@ CONFIG = {
         help="Input length ratio to obtain max output length.\n"
         "If maxlenratio=0.0 (default), it uses a end-detect function to automatically find maximum hypothesis lengths"),
     "minlenratio": dict(default=0.0, type=float, help='Input length ratio to obtain min output length'),
+    "sym-space": dict(default='<space>', type=str, help='Space symbol'),
+    "sym-blank": dict(default='<blank>', type=str, help='Blank symbol'),
 
     # Batches
     "sortagrad": dict(default=0, type=int, nargs='?', help="How many epochs to use sortagrad for. 0 = deactivated, -1 = all epochs"),
@@ -219,17 +223,7 @@ def main(command_args):
     random.seed(args.seed)
     np.random.seed(args.seed)
 
-    # load dictionary for debug log
-    if args.dict is not None:
-        with open(args.dict, 'rb') as f:
-            dictionary = f.readlines()
-        char_list = [entry.decode('utf-8').split(' ')[0]
-                     for entry in dictionary]
-        char_list.insert(0, '<blank>')
-        char_list.append('<eos>')  # FIXME: <eos> here vs </s> in w2v_train
-        args.char_list = char_list
-    else:
-        args.char_list = None
+    args.char_list = load_dictionary(args) if args.dict is not None else None
 
     # recog
     if args.task == "word":

@@ -19,6 +19,7 @@ import torch
 from espnet.utils.cli_utils import strtobool, count_gpus
 from espnet.utils.training.batchfy import BATCH_COUNT_CHOICES
 from espnet.utils.dynamic_import import dynamic_import
+from espnet.utils.io_utils import load_dictionary
 from distutils.util import strtobool as strtobool_
 
 # TODO: compat --> replace with flags / options (= 4: rnn-type, vgg-frontend, bidirectional-encoder, pyramidal)
@@ -253,19 +254,7 @@ def main(cmd_args):
     np.random.seed(args.seed)
 
     # load dictionary for debug log
-    if args.dict is not None:
-        with open(args.dict, 'r', encoding='utf-8') as f:
-            char_list = list(map(str.strip, f.readlines()))
-
-        blank, eos = args.sym_blank, '</s>'
-        if blank not in char_list:
-            char_list.insert(0, blank)
-        if eos not in char_list:
-            char_list.append(eos)
-        args.char_list = char_list
-
-    else:
-        args.char_list = None
+    args.char_list = load_dictionary(args)
 
     # train
 

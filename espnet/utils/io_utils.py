@@ -11,6 +11,23 @@ import soundfile
 from espnet.transform.transformation import Transformation
 
 
+def load_dictionary(args):
+
+    if args.dict is None or not os.path.exists(args.dict):
+        return
+
+    with open(args.dict, 'r', encoding='utf-8') as f:
+        char_list = list(map(str.strip, f.readlines()))
+
+    blank, eos = args.sym_blank, '</s>'
+    if blank not in char_list:
+        char_list.insert(0, blank)
+    if eos not in char_list:
+        char_list.append(eos)
+    return char_list
+
+
+
 class LoadInputsAndTargets(object):
     """Create a mini-batch from a list of dicts
 
@@ -147,7 +164,7 @@ class LoadInputsAndTargets(object):
                             filetype=inp.get('filetype', 'mat'))
 
                     y_feats_dict.setdefault(inp['name'], []).append(x)
-                    
+
         if self.mode == 'asr':
             return_batch, uttid_list = self._create_batch_asr(
                 x_feats_dict, y_feats_dict, uttid_list)

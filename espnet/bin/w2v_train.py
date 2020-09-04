@@ -17,6 +17,7 @@ from pathlib import Path
 import configargparse
 import numpy as np
 import torch
+from espnet.utils.io_utils import load_dictionary
 from espnet.utils.cli_utils import strtobool, count_gpus
 from espnet.utils.training.batchfy import BATCH_COUNT_CHOICES
 from espnet.utils.dynamic_import import dynamic_import
@@ -92,6 +93,8 @@ CONFIG = {
         help="Input length ratio to obtain max output length.\n"
         "If maxlenratio=0.0 (default), it uses a end-detect function to automatically find maximum hypothesis lengths"),
     "minlenratio": dict(default=0.0, type=float, help='Input length ratio to obtain min output length'),
+    "sym-space": dict(default='<space>', type=str, help='Space symbol'),
+    "sym-blank": dict(default='<blank>', type=str, help='Blank symbol'),
 
     # Batches
     "sortagrad": dict(default=0, type=int, nargs='?', help="How many epochs to use sortagrad for. 0 = deactivated, -1 = all epochs"),
@@ -132,7 +135,7 @@ CONFIG = {
 
     # Pretrained models
     "enc-init": dict(default=None, type=str, help='Pre-trained ASR model to initialize encoder.'),
-    "enc-init-mods": dict(default='encoder.', type=split_string(','), help='List of encoder modules to initialize, separated by a comma.'),
+    "enc-init-mods": dict(default='encoder.,ctc.', type=split_string(','), help='List of encoder modules to initialize, separated by a comma.'),
     "dec-init": dict(default=None, type=str, help='Pre-trained ASR, MT or LM model to initialize decoder.'),
     "dec-init-mods": dict(default='decoder.', type=split_string(','), help='List of decoder modules to initialize, separated by a comma.'),
 
@@ -219,18 +222,8 @@ def main(cmd_args):
     np.random.seed(args.seed)
 
     # load dictionary for debug log
-    if args.dict is not None and Path(args.dict).exists():
-        with open(args.dict, 'rb') as f:
-            char_list = [entry.decode('utf-8').split(' ')[0] for entry in f.readlines()]
+    args.char_list = load_dictionary(args)
     
-        char_list.insert(0, '<blank>')
-        if "</s>" not in char_list:
-            char_list.append('</s>')
-        args.char_list = char_list
-
-    else:
-        args.char_list = None
-
     # train
     if not args.v1:
         from espnet.mtl.train import train
