@@ -11,6 +11,8 @@ import numpy
 
 from espnet.asr import asr_utils
 
+plt.switch_backend('Agg')
+
 
 def _plot_and_save_attention(att_w, filename, xtokens=None, ytokens=None):
     # dynamically import matplotlib due to not found error
@@ -40,6 +42,7 @@ def _plot_and_save_attention(att_w, filename, xtokens=None, ytokens=None):
             ax.set_yticks(numpy.linspace(0, len(ytokens) - 1, len(ytokens)))
             ax.set_yticks(numpy.linspace(0, len(ytokens) - 1, 1), minor=True)
             ax.set_yticklabels(ytokens + [''])
+    
     fig.tight_layout()
     return fig
 
