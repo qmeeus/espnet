@@ -7,7 +7,7 @@ from espnet.nets.pytorch_backend.nets_utils import make_pad_mask
 
 class MaskedMSELoss(nn.Module):
     
-    def __init__(self, reduction='mean'):
+    def __init__(self, reduction='sum'):
         super(MaskedMSELoss, self).__init__()
         self.reduction = reduction
 
@@ -15,11 +15,11 @@ class MaskedMSELoss(nn.Module):
         target_mask = make_pad_mask(target_lengths).type_as(target).bool()
         mse = F.mse_loss(pred, target, reduction='none').mean(-1)
         mse.masked_fill_(target_mask, 0)
-        sequence_loss = (mse.sum(-1) / target_lengths)
+        sequence_loss = mse.sum(-1)
         if self.reduction == 'sum':
             return sequence_loss.sum()
         elif self.reduction == 'mean':
-            return sequence_loss.mean()
+            return (sequence_loss / target_lengths).mean()
         else:
             return sequence_loss
 
