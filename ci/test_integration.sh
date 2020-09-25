@@ -68,6 +68,9 @@ echo "=== ASR (backend=pytorch, model=transformer-transducer) ==="
         --decode-config conf/decode_transducer.yaml
 echo "=== ASR (backend=pytorch, model=transformer-transducer-att) ==="
 ./run.sh --python "${python}" --stage 4 --train-config conf/train_transformer_transducer_attention.yaml \
+         --decode-config conf/decode_transducer.yaml
+echo "=== ASR (backend=pytorch, model=conformer-transducer) ==="
+./run.sh --python "${python}" --stage 4 --train-config conf/train_conformer_transducer.yaml \
         --decode-config conf/decode_transducer.yaml
 
 echo "==== ASR (backend=pytorch num-encs 2) ==="
@@ -149,6 +152,19 @@ echo "==== TTS (backend=pytorch) ==="
 # Remove generated files in order to reduce the disk usage
 rm -rf exp tensorboard dump data
 cd "${cwd}" || exit 1
+
+echo "=== run integration tests at test_utils ==="
+
+PATH=$(pwd)/bats-core/bin:$PATH
+if ! [ -x "$(command -v bats)" ]; then
+    echo "=== install bats ==="
+    git clone https://github.com/bats-core/bats-core.git
+fi
+bats test_utils/integration_test_*.bats
+
+
+#### Make sure chainer-independent ####
+python3 -m pip uninstall -y chainer
 
 # [ESPnet2] test asr recipe
 cd ./egs2/mini_an4/asr1 || exit 1
@@ -241,17 +257,6 @@ for d in egs2/TEMPLATE/*; do
         egs2/TEMPLATE/"$d"/setup.sh egs2/test/"${d}"
     fi
 done
-
-
-echo "=== run integration tests at test_utils ==="
-
-PATH=$(pwd)/bats-core/bin:$PATH
-if ! [ -x "$(command -v bats)" ]; then
-    echo "=== install bats ==="
-    git clone https://github.com/bats-core/bats-core.git
-fi
-bats test_utils/integration_test_*.bats
-
 echo "=== report ==="
 
 coverage report

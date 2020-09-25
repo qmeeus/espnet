@@ -29,8 +29,12 @@ ifeq ($(strip $(CPU_ONLY)),)
 # Derive CUDA version from nvcc
 CUDA_VERSION = $(shell nvcc --version | grep "Cuda compilation tools" | cut -d" " -f5 | sed s/,//)
 CUDA_VERSION_WITHOUT_DOT = $(strip $(subst .,,$(CUDA_VERSION)))
-CONDA_PYTORCH := pytorch=$(TH_VERSION) cudatoolkit=$(CUDA_VERSION)
 PIP_PYTORCH := torch==$(TH_VERSION) -f https://download.pytorch.org/whl/cu$(CUDA_VERSION_WITHOUT_DOT)/torch_stable.html
+ifeq ($(strip $(CUDA_VERSION_WITHOUT_DOT)),80)
+CONDA_PYTORCH := pytorch=$(TH_VERSION) cuda$(CUDA_VERSION_WITHOUT_DOT)
+else
+CONDA_PYTORCH := pytorch=$(TH_VERSION) cudatoolkit=$(CUDA_VERSION)
+endif
 
 else
 CONDA_PYTORCH := pytorch=$(TH_VERSION) cpuonly
@@ -47,7 +51,7 @@ PIP_CHAINER := chainer==$(CHAINER_VERSION)
 
 .PHONY: all clean
 
-all: kaldi showenv python conda_packages.done check_install
+all: kaldi showenv python conda_packages.done sctk.done sph2pipe.done check_install
 
 ifneq ($(strip $(CHAINER_VERSION)),)
 python: activate_python.sh warp-ctc.done warp-transducer.done espnet.done pytorch.done chainer_ctc.done chainer.done
@@ -55,7 +59,7 @@ else
 python: activate_python.sh warp-ctc.done warp-transducer.done espnet.done pytorch.done
 endif
 
-extra: nkf.done moses.done mwerSegmenter.done pesq kenlm.done
+extra: nkf.done moses.done mwerSegmenter.done pesq kenlm.done pyopenjtalk.done py3mmseg.done
 
 kaldi:
 	test -f kaldi/egs/wsj/s5/utils/parse_options.sh || { echo -e "Error: Put Kaldi here!\n    $$ ln -s <kaldi-root> kaldi"; exit 1; }
@@ -68,6 +72,7 @@ showenv: activate_python.sh
 ifeq ($(strip $(CPU_ONLY)),)
 	[ -n "${CUDA_HOME}" ] || { echo -e "Error: CUDA_HOME is not set.\n    $$ . ./setup_cuda_env.sh <cuda-root>"; exit 1; }
 	@echo CUDA_VERSION=$(CUDA_VERSION)
+	. ./activate_python.sh && python3 check_pytorch_cuda_compatibility.py $(TH_VERSION) ${CUDA_VERSION} || { echo "Change TH_VERSION or CUDA_VERSION"; exit 1; }
 else
 	@echo Perform on CPU mode: CPU_ONLY=$(CPU_ONLY)
 endif
@@ -97,7 +102,7 @@ sox.done: activate_python.sh
 	. ./activate_python.sh && { command -v sox || conda install -y sox -c conda-forge; }
 	touch sox.done
 sndfile.done: activate_python.sh
-	. ./activate_python.sh && { python3 -c "from ctypes.util import find_library as F; assert F('sndfile') is not None" || conda install -y libsndfile -c conda-forge; }
+	. ./activate_python.sh && { python3 -c "from ctypes.util import find_library as F; assert F('sndfile') is not None" || conda install -y libsndfile=1.0.28 -c conda-forge; }
 	touch sndfile.done
 ifneq ($(strip $(IS_CONDA)),)
 conda_packages.done: cmake.done flac.done ffmpeg.done sox.done sndfile.done
@@ -105,6 +110,14 @@ else
 conda_packages.done:
 endif
 	touch conda_packages.done
+
+
+sctk.done:
+	./installers/install_sctk.sh
+	touch sctk.done
+sph2pipe.done:
+	./installers/install_sph2pipe.sh
+	touch sph2pipe.done
 
 
 ifneq ($(strip $(USE_PIP)),)
@@ -129,7 +142,7 @@ ifneq ($(strip $(NO_CUPY)),)
 else
 	# Precompiled cupy==6.0.0 for python>=3.8 is not provided
 	. ./activate_python.sh && \
-		if python3 -c "import sys; from distutils.version import LooseVersion as L; assert L(sys.version) <= L('3.7')" 2>1 /dev/null; then \
+		if python3 -c "import sys; from distutils.version import LooseVersion as L; assert L(sys.version) < L('3.8')" 2>&1 /dev/null; then \
 			python3 -m pip install $(PIP_CHAINER) cupy-cuda$(CUDA_VERSION_WITHOUT_DOT)==$(CHAINER_VERSION); \
 		else \
 			python3 -m pip install $(PIP_CHAINER) cupy==$(CHAINER_VERSION); \
@@ -143,8 +156,14 @@ warp-ctc.done: pytorch.done conda_packages.done
 	touch warp-ctc.done
 
 warp-transducer.done: pytorch.done conda_packages.done
+ifeq ($(strip $(CPU_ONLY)),)
+	. ./activate_python.sh && ./installers/install_warp-transducer.sh
+	. ./activate_python.sh &&  ./installers/install_warp-rnnt.sh $(CUDA_VERSION)
+	touch warp-transducer.done
+else
 	. ./activate_python.sh && ./installers/install_warp-transducer.sh
 	touch warp-transducer.done
+endif
 
 chainer_ctc.done: chainer.done
 	. ./activate_python.sh && ./installers/install_chainer_ctc.sh
@@ -159,7 +178,7 @@ pyopenjtalk.done: espnet.done conda_packages.done
 	touch pyopenjtalk.done
 
 moses.done:
-	git clone https://github.com/moses-smt/mosesdecoder.git moses
+	git clone --depth 1 https://github.com/moses-smt/mosesdecoder.git moses
 	touch moses.done
 
 mwerSegmenter.done:
@@ -174,6 +193,9 @@ pesq: PESQ/P862_annex_A_2005_CD/source/PESQ
 PESQ/P862_annex_A_2005_CD/source/PESQ:
 	./installers/install_pesq.sh
 
+py3mmseg.done: espnet.done
+	. ./activate_python.sh && ./installers/install_py3mmseg.sh
+	touch py3mmseg.done
 
 check_install: python
 ifeq ($(strip $(CPU_ONLY)),)
@@ -196,12 +218,12 @@ endif
 
 
 clean: clean_extra
-	rm -rf warp-ctc warp-transducer chainer_ctc
+	rm -rf warp-ctc warp-transducer warp-rnnt chainer_ctc
 	rm -rf *.done
 	find . -iname "*.pyc" -delete
 
 clean_python:
-	rm -rf warp-ctc warp-transducer chainer_ctc
+	rm -rf warp-ctc warp-transducer warp-rnnt chainer_ctc
 	rm -f warp-ctc.done chainer_ctc.done espnet.done chainer.done pytorch.done warp-transducer.done
 	find . -iname "*.pyc" -delete
 
