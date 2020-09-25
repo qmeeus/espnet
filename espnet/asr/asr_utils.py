@@ -27,6 +27,8 @@ import numpy as np
 import torch
 matplotlib.use('Agg')
 
+from espnet.utils.training.train_utils import make_logistic_scheduler
+
 
 # * -------------------- training iterator related -------------------- *
 
@@ -288,6 +290,20 @@ def _restore_snapshot(model, snapshot, load_fn=chainer.serializers.load_npz):
     load_fn(snapshot, model)
     logging.info('restored from ' + str(snapshot))
 
+
+def alpha_scheduler(alpha_min, alpha_max, rho, delay, max_epochs):
+    """Extension to decrease mtlalpha over time
+    Args: see logistic_scheduler
+    """
+
+    scheduler = make_logistic_scheduler(alpha_min, alpha_max, rho, delay, max_epochs)
+
+    @training.make_extension(trigger=(1, 'epoch'))
+    def _alpha_scheduler(trainer):
+        new_value = scheduler(trainer.updater.get_iterator('main').epoch)
+        trainer.updater.model.mtlalpha = new_value
+
+    return _alpha_scheduler
 
 def adadelta_eps_decay(eps_decay):
     """Extension to perform adadelta eps decay.

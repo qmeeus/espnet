@@ -178,7 +178,15 @@ def train(args):
         dtype = torch.float32
 
     # specify attention, CTC, hybrid mode
-    if args.mtlalpha == 1.0:
+    if args.freeze_encoder == -1:
+        args.mtl_mode = 'mtl'
+        args.mtlalpha = 0
+        args.alpha_scheduler = None
+    elif getattr(args, "alpha_scheduler", None):
+        args.mtl_mode = 'mtl'
+        args.mtlalpha = args.alpha_scheduler[0]
+        logging.info("Multitask learning mode with scheduler")
+    elif args.mtlalpha == 1.0:
         args.mtl_mode = 'ctc'
         logging.info('Pure CTC mode')
     elif args.mtlalpha == 0.0:
@@ -207,8 +215,9 @@ def train(args):
     if args.freeze_encoder == -1:
         logging.warn("Freeze the encoder and disabling gradients for this module")
         optimizer = get_optimizer(model.decoder, args, reporter)
-        for param in model.encoder.parameters():
-            param.requires_grad = False
+        for module in args.enc_init_mods:
+            for param in getattr(model, module.strip(".")).parameters():
+                param.requires_grad = False
     else:
         optimizer = get_optimizer(model, args, reporter)
         if args.freeze_encoder > 0:
@@ -290,10 +299,15 @@ def recog(args):
         args (namespace): The program arguments.
 
     """
+
     set_deterministic_pytorch(args)
     model, train_args = load_trained_model(args.model)
     assert isinstance(model, ASRInterface)
     model.recog_args = args
+
+    model.eval()
+    for param in model.parameters():
+        param.requires_grad = False
 
     rnnlm = None
 
@@ -317,14 +331,17 @@ def recog(args):
         preprocess_args={'train': False}
     )
 
-    if args.batchsize == 0:
+    device = "cuda" if args.ngpu > 0 else "cpu"
+
+    if args.batchsize < 2:
         with torch.no_grad():
             for idx, name in enumerate(js.keys(), 1):
                 logging.info('(%d/%d) decoding ' + name, idx, len(js.keys()))
                 batch = [(name, js[name])]
                 feat = load_inputs_and_targets(batch)
                 feat = feat[0][0] if args.num_encs == 1 else [feat[idx][0] for idx in range(model.num_encs)]
-                nbest_hyps = model.recognize(torch.as_tensor(feat), args, train_args.char_list, rnnlm)
+                feat = torch.as_tensor(feat).to(device)
+                nbest_hyps = model.recognize(feat, args, train_args.char_list, rnnlm)
                 new_js[name] = add_results_to_json(js[name], nbest_hyps, train_args.char_list)
 
     else:
@@ -344,6 +361,7 @@ def recog(args):
                 names = [name for name in names if name]
                 batch = [(name, js[name]) for name in names]
                 feat = load_inputs_and_targets(batch)[0] if args.num_encs == 1 else load_inputs_and_targets(batch)
+                feat = torch.as_tensor(feat).to(device)
                 nbest_hyps = model.recognize_batch(torch.as_tensor(feat), args, train_args.char_list, rnnlm=rnnlm)
 
                 for i, nbest_hyp in enumerate(nbest_hyps):

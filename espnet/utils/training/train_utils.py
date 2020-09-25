@@ -1,3 +1,4 @@
+import numpy as np
 import logging
 from chainer.training.triggers import EarlyStoppingTrigger
 
@@ -32,3 +33,17 @@ def set_early_stop(trainer, args, is_lm=False):
             patients=patience,
             max_trigger=(epochs, 'epoch')
         )
+
+
+def make_logistic_scheduler(x0=0.1, xN=0.9, rho=20, delay=10, N=15):
+    """Create a logistic scheduler as a function of the current step
+
+    :param x0: initial value
+    :param xN: end value
+    :param rho: the rate of growth/decay
+    :param N: number of expected steps
+    """
+    def scheduler(n):
+        return x0 + ((xN - x0) / ((1 + delay * np.exp(rho * (.5 - n / N)))))
+
+    return scheduler

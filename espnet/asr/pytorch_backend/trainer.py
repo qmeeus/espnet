@@ -17,7 +17,7 @@ from espnet.asr.asr_utils import torch_load
 from espnet.asr.asr_utils import torch_resume
 from espnet.asr.asr_utils import torch_snapshot
 from espnet.asr.asr_utils import CompareValueTrigger
-from espnet.asr.asr_utils import adadelta_eps_decay
+from espnet.asr.asr_utils import adadelta_eps_decay, alpha_scheduler
 from espnet.utils.training.tensorboard_logger import TensorboardLogger
 
 
@@ -228,16 +228,32 @@ class CustomTrainer:
                 trigger=trigger_best
             )
 
-            def get_obs_value(trainer):
+            def get_eps_value(trainer):
                 return trainer.updater.get_optimizer('main').param_groups[0]["eps"]
 
             self.add_extension(
-                extensions.observe_value('eps', get_obs_value),
+                extensions.observe_value('eps', get_eps_value),
                 trigger=(args.report_interval_iters, 'iteration')
             )
 
+            report_keys.append('eps')
 
-        report_keys.append('eps')
+        if getattr(args, "alpha_scheduler", False):
+            # alpha_scheduler = (initial_value, end_value, epsilon, max_steps)
+            self.add_extension(
+                alpha_scheduler(*args.alpha_scheduler),
+                trigger=(1, 'epoch')
+            )
+
+            def get_alpha_value(trainer):
+                return self.model.mtlalpha
+
+            self.add_extension(
+                extensions.observe_value('alpha', get_alpha_value),
+                trigger=(1, 'epoch')
+            )
+
+            report_keys.append('alpha')
 
         if args.report_cer:
             report_keys.append('validation/main/cer')
