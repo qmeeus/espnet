@@ -2,19 +2,19 @@
 Universe            = vanilla
 
 NiceUser            = true
-RequestCpus         = 8
-RequestMemory       = 16G
+RequestCpus         = 12
+RequestMemory       = 32G
 +RequestWallTime    = 43200
 Request_GPUs        = 0
 Requirements        = 
 
 Initialdir          = /esat/spchdisk/scratch/qmeeus/repos/espnet/egs/patience/sti1 
 Executable          = /esat/spchdisk/scratch/qmeeus/bin/anaconda3/envs/espnet/bin/python  
-Arguments           = train_svm.py $(job) --njobs 8 --combine mean 
+Arguments           = train_svm.py $(job) --njobs 12 --combine mean --exp-name text_average_svm --features data/text --target data/encoded_target.csv 
 
 Notification        = Complete
 Log                 = exp/condor_log/condor.$(ClusterId).$(ProcId).log
 Output              = exp/condor_log/condor.$(ClusterId).$(ProcId).out 
 Error               = exp/condor_log/condor.$(ClusterId).$(ProcId).err
 
-Queue job matching data/jobs/* 
+Queue job matching data/jobs/blocks-pp*.txt 

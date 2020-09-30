@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pandas as pd
 import multiprocessing as mp
@@ -38,20 +39,72 @@ def get_eval_func(classifier, average='macro'):
     metric_names = ("accuracy", "precision", "recall", "f1_score")
     return metric_names, evaluate
 
+#def hdf5_loader(filename, indices):
+#    with h5py.File(filename, "r") as h5f:
+#        for key in indices:
+#            if key in h5f:
+#                yield key, h5f[key][()]
+#
 
-def load_data(indices, features, targets, multiclass=False, combine='first'):
+def hdf5_loader(filename, indices=None):
+    getitem = lambda k: (k, h5f[k][()])
+    with h5py.File(filename, "r") as h5f:
+        indices = list(filter(lambda k: k in h5f)) if indices else list(h5f.keys())
+        yield from map(getitem, indices)
+
+
+def text2features(texts):
+    from transformers import AutoModel, AutoTokenizer
+    model_str = "distilbert-base-multilingual-cased"
+    tokenizer = AutoTokenizer.from_pretrained(model_str)
+    model = AutoModel.from_pretrained(model_str)
+    for param in model.parameters():
+        param.requires_grad = False
+
+    encoded_texts = tokenizer.batch_encode_plus(
+        texts["text"], add_special_tokens=False, padding=True, return_tensors="pt"
+    )
+
+    features, = model(**encoded_texts)
+    input_lengths = encoded_texts["attention_mask"].sum(-1)
+    return features, input_lengths
+
+
+def text_loader(filename, indices=None):
+
+    with open(filename, encoding="utf-8") as f:
+        texts = pd.DataFrame(
+            map(lambda s: s.split(" ", maxsplit=1), map(str.strip, f.readlines())),
+            columns=["uttid", "text"]
+        ).set_index("uttid").dropna(how='any')
+
+    if indices:
+        texts = text.loc[indices]
+
+    indices = list(texts.index)
+    features, input_lengths = text2features(texts)
+
+    for i, (j, key) in enumerate(zip(input_lengths, indices)):
+        yield key, features[i, :j].numpy()
+
+
+def load_data(features, targets, indices=None, multiclass=False, combine='first'):
+    Loader = hdf5_loader if features.suffix == "h5" else text_loader
+    loader = Loader(features, indices)
+
     if combine == "first":
         combine_func = itemgetter(0)
-    elif combine == "mean":
+    elif combine == "average":
         combine_func = partial(np.mean, axis=0)
     else:
         raise NotImplementedError(f"Unknown argument: combine={combine}")
 
-    with h5py.File(features, "r") as h5f:
-        features = np.array([combine_func(h5f[key][()]) for key in indices])
+    indices, features = map(list, zip(*map(lambda t: (t[0], combine_func(t[1])), loader)))
+    features = np.array(features)
     targets = pd.read_csv(targets, index_col="uttid").loc[indices]
     if multiclass:
-        targets.columns = pd.MultiIndex.from_tuples(map(lambda c: c.split("_", maxsplit=1), targets.columns))
+        targets.columns = pd.MultiIndex.from_tuples(
+            map(lambda c: c.split("_", maxsplit=1), targets.columns))
         targets = targets.groupby(level=0, axis=1).agg(lambda gr: np.argmax(gr.values, axis=1))
     return features, targets.values, targets.index, targets.columns
 
@@ -79,7 +132,7 @@ def train(exp_dir=None,
     exp_dir = Path(exp_dir)
     (X_train, y_train, train_ids, classes), (X_test, y_test, test_ids, _) = (
         load_data(
-            np.loadtxt(exp_dir/f"{subset}.ids", dtype='str'),
+            indices=np.loadtxt(exp_dir/f"{subset}.ids", dtype='str'),
             features=features, targets=targets,
             multiclass=multiclass,
             combine=combine
@@ -93,21 +146,23 @@ def train(exp_dir=None,
         if not has_more_than_one_class(y_train[:, i]):
             print(f'Class {target_name}: only one class present in dataset')
             train_predictions[target_name] = np.unique(y_train[:, i])[0]
-            test_predictions[target_name] = np.unique(y_train[:, i])[0]
+            test_predictions[target_name] = np.unique(y_test[:, i])[0]
             continue
 
         classifier.fit(X_train, y_train[:, i])
         train_predictions[target_name] = classifier.predict(X_train)
         test_predictions[target_name] = classifier.predict(X_test)
 
-    suffix = "" if exp_name is None else f"_{exp_name}"
-    with open(exp_dir/f"train_scores{suffix}.txt", 'w') as f:
-        f.write(classification_report(y_train, train_predictions, zero_division=0., target_names=classes))
+    outdir = exp_dir / exp_name
+    os.makedirs(outdir, exist_ok=True)
 
-    with open(exp_dir/f"test_scores{suffix}.txt", 'w') as f:
-        f.write(classification_report(y_test, test_predictions, zero_division=0., target_names=classes))
+    with open(outdir/f"train_scores.txt", 'w') as f:
+        f.write(classification_report(
+            y_train, train_predictions, zero_division=0., target_names=classes))
 
-    test_predictions.to_pickle(exp_dir/f"test_predictions{suffix}.pkl")
+    with open(outdir/f"test_scores.txt", 'w') as f:
+        f.write(classification_report(
+            y_test, test_predictions, zero_division=0., target_names=classes))
 
     train_accuracy, test_accuracy = (
         np.mean([
@@ -149,15 +204,15 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("tasks", type=Path, nargs="+")
-    parser.add_argument("--features", type=Path, default="data/grabo_w2v/features.h5")
-    parser.add_argument("--targets", type=Path, default="data/grabo_w2v/encoded_target.h5")
-    parser.add_argument("--exp_name", type=str, default=None)
+    parser.add_argument("--features", type=Path, default=FEATURES)
+    parser.add_argument("--targets", type=Path, default=TARGET)
+    parser.add_argument("--exp-name", type=str, required=True)
     parser.add_argument("--njobs", type=int, default=8)
     parser.add_argument("--C", type=float, default=10.)
     parser.add_argument("--kernel", type=str, choices=['linear', 'rbf', 'sigmoid', 'poly'], default='linear')
-    parser.add_argument("--class_weight", type=str, default='balanced')
+    parser.add_argument("--class-weight", type=str, default='balanced')
     parser.add_argument("--multiclass", action="store_true", default=False)
-    parser.add_argument("--combine", type=str, choices=['first', 'mean'], default='first')
-    parser.add_argument("--random_state", type=int, default=42)
+    parser.add_argument("--combine", type=str, choices=["first", "average"], default="first")
+    parser.add_argument("--random-state", type=int, default=42)
     train_many(**vars(parser.parse_args()))
 

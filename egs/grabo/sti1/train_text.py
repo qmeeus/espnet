@@ -26,7 +26,6 @@ from model import IntentClassifier
 logger = logging.getLogger(__name__)
 
 
-
 @dataclass
 class ModelArguments:
     """
@@ -58,13 +57,13 @@ class Speech2IntentModel(DistilBertPreTrainedModel):
         self.distilbert = DistilBertModel(config)
         self.distilbert.requires_grad_ = not config.freeze_bert
         self.classifier = IntentClassifier(
-            input_dim=config.dim, 
+            input_dim=config.dim,
             output_dim=config.output_dim,
-            # n_actions=config.n_actions, 
-            # n_instructions=config.n_instructions, 
+            # n_actions=config.n_actions,
+            # n_instructions=config.n_instructions,
             dropout_rate=config.seq_classif_dropout
         )
-        
+
         self.init_weights()
 
     def forward(self, input_ids=None,
@@ -283,3 +282,4 @@ def _mp_fn(index):
 
 if __name__ == "__main__":
     main()
+
