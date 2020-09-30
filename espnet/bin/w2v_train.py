@@ -151,6 +151,7 @@ CONFIG = {
     "ctc_type": dict(default='warpctc', type=str, choices=['builtin', 'warpctc'], help='Type of CTC implementation to calculate loss.'),
     "mtlalpha": dict(default=0.5, type=float, help='Multitask learning coefficient, alpha: alpha*ctc_loss + (1-alpha)*att_loss '),
     "lsm-weight": dict(default=0.0, type=float, help='Label smoothing weight'),
+    "alpha-scheduler": dict(default=None, nargs=5, type=float, help="Scheduler for mtlalpha (xmin, xmax, rho, delay, max_step)"),
 
     # Weighted Prediction Error
     "use-wpe": dict(type=strtobool, default=False, help='Apply Weighted Prediction Error'),
