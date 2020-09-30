@@ -346,7 +346,7 @@ class Decoder(torch.nn.Module, ScorerInterface):
         else:
             hyp = {'score': 0.0, 'yseq': [y], 'c_prev': c_list, 'z_prev': z_list, 'a_prev': a}
         if lpz[0] is not None:
-            ctc_prefix_score = [CTCPrefixScore(lpz[idx].detach().numpy(), 0, self.eos, np) for idx in
+            ctc_prefix_score = [CTCPrefixScore(lpz[idx].detach().numpy(), 0, self.eos) for idx in
                                 range(self.num_encs)]
             hyp['ctc_state_prev'] = [ctc_prefix_score[idx].initial_state() for idx in range(self.num_encs)]
             hyp['ctc_score_prev'] = [0.0] * self.num_encs

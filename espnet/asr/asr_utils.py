@@ -582,7 +582,7 @@ def parse_hypothesis(hyp, char_list):
     # convert to string
     tokenid = " ".join([str(idx) for idx in tokenid_as_list])
     token = " ".join(token_as_list)
-    text = " ".join(token_as_list).replace('<space>', ' ')
+    text = "".join(token_as_list).replace('▁', ' ')
 
     return text, token, tokenid, score
 

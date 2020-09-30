@@ -177,7 +177,6 @@ class Decoder(ScorerInterface, torch.nn.Module):
             y = x[:, -1]
         if self.output_layer is not None:
             y = torch.log_softmax(self.output_layer(y), dim=-1)
-
         return y, new_cache
 
     # beam search API (see ScorerInterface)

@@ -55,7 +55,6 @@ class E2E(BaseE2E):
         :param int odim: dimension of outputs
         :param Namespace args: argument Namespace containing options
         """
-        assert 0 < args.mtlalpha < 1
         args.report_cer = args.report_wer = False
         super(E2E, self).__init__(idim, odim, args, ignore_id=-1)
         self.teacher_model, self.teacher_tokenizer = self.load_teacher(args.teacher_model)
@@ -69,6 +68,16 @@ class E2E(BaseE2E):
         for p in teacher.parameters():
             p.requires_grad = False
         return teacher, tokenizer
+
+    def get_sos_embedding(self):
+        return self.teacher_model(
+            self.teacher_tokenizer.encode(
+                "",
+                add_special_tokens=True,
+                truncation="longest_first",
+                return_tensors='pt'
+            )[:, :1].to(self.teacher_model.device)
+        )[0].squeeze()
 
     def teacher_encode(self, sentences, add_special_tokens=True):
         # NOTE: Probably super slow
@@ -202,8 +211,10 @@ class E2E(BaseE2E):
 
     def predict(self, xs_pad, ilens):
 
-        assert hasattr(self, 'ctc') and self.char_list is not None
-        
+        force_ctc = True
+
+        assert not(force_ctc) or (hasattr(self, 'ctc') and self.char_list is not None)
+
         self.eval()
         with torch.no_grad():
 
@@ -214,30 +225,48 @@ class E2E(BaseE2E):
             hlens = hs_mask.sum(-1)
             batch_size = len(hlens)
 
-            # 2. Forward CTC
-            enc_out = hs_pad.view(batch_size, -1, self.adim)
-            ctc_out = self.ctc.argmax(enc_out).data
+            if force_ctc:
+                # 2. Forward CTC
+                enc_out = hs_pad.view(batch_size, -1, self.adim)
+                ctc_out = self.ctc.argmax(enc_out).data
 
-            # 3. Transform CTC output in texts
-            texts = [
-                tokens2text(
-                    tokens=y.tolist(),
-                    char_list=self.char_list,
-                    ignore_indices=(0, -1),
-                    return_sentence=True,
-                    is_ctc=True
-                ) for y in ctc_out
-            ]
+                # 3. Transform CTC output in texts
+                texts = [
+                    tokens2text(
+                        tokens=y.tolist(),
+                        char_list=self.char_list,
+                        ignore_indices=(0, -1),
+                        return_sentence=True,
+                        is_ctc=True
+                    ) for y in ctc_out
+                ]
 
-            # 4. Encode the texts with the teacher model
-            ys_pad = self.teacher_encode(texts).to(hs_pad.device)
+                # 4. Encode the texts with the teacher model
+                ys_pad = self.teacher_encode(texts).to(hs_pad.device)
 
-            # 5. Forward decoder
-            ys_in_pad, ys_out_pad = ys_pad[:, :-1].clone(), ys_pad[:, 1:].clone()
-            ys_mask = target_mask(ys_in_pad)
-            pred_pad, pred_mask = self.decoder(ys_in_pad, ys_mask, hs_pad, hs_mask)
+                # 5. Forward decoder
+                ys_in_pad, ys_out_pad = ys_pad[:, :-1].clone(), ys_pad[:, 1:].clone()
+                ys_mask = target_mask(ys_in_pad)
+                pred_pad, pred_mask = self.decoder(ys_in_pad, ys_mask, hs_pad, hs_mask)
 
-            return pred_pad, pred_mask
+                return pred_pad, pred_mask
+
+            else:
+                sos_embedding = self.get_sos_embedding()
+                maxlen = enc_out.shape[1]
+                ys = sos_embedding.repeat(batch_size, 1).view(batch_size, 1, -1)
+                c = None
+
+                # TODO: how to detect end vector?
+                for i in range(maxlen):
+    
+                    # get nbest local scores and their ids
+                    ys_mask = subsequent_mask(i + 1).repeat(batch_size, 1, 1).to(enc_out.device)
+                    y, c = self.decoder.forward_one_step(ys, ys_mask, enc_out, cache=c)
+                    ys = torch.cat([ys, y.unsqueeze(1)], dim=1)
+
+                return ys, torch.tensor([False]).repeat(*ys.size())
+
 
     def tokens_to_string(self, tokens):
         raise NotImplementedError

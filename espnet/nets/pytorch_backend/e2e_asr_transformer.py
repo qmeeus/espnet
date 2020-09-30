@@ -168,8 +168,6 @@ class E2E(ASRInterface, torch.nn.Module):
         )
 
     def build_ctc_layer(self, args):
-        if self.mtlalpha == 0.0:
-            return
         return CTC(
             odim=self.odim, 
             eprojs=args.adim, 
@@ -342,11 +340,9 @@ class E2E(ASRInterface, torch.nn.Module):
         else:
             hyp = {'score': 0.0, 'yseq': [y]}
         if lpz is not None:
-            import numpy
-
             from espnet.nets.ctc_prefix_score import CTCPrefixScore
 
-            ctc_prefix_score = CTCPrefixScore(lpz.detach().numpy(), 0, self.eos, numpy)
+            ctc_prefix_score = CTCPrefixScore(lpz.cpu().detach().numpy(), 0, self.eos, np)
             hyp['ctc_state_prev'] = ctc_prefix_score.initial_state()
             hyp['ctc_score_prev'] = 0.0
             if ctc_weight != 1.0:
@@ -358,9 +354,8 @@ class E2E(ASRInterface, torch.nn.Module):
         hyps = [hyp]
         ended_hyps = []
 
-        import six
         traced_decoder = None
-        for i in six.moves.range(maxlen):
+        for i in range(maxlen):
             logging.debug('position ' + str(i))
 
             hyps_best_kept = []
@@ -368,8 +363,8 @@ class E2E(ASRInterface, torch.nn.Module):
                 vy[0] = hyp['yseq'][i]
 
                 # get nbest local scores and their ids
-                ys_mask = subsequent_mask(i + 1).unsqueeze(0)
-                ys = torch.tensor(hyp['yseq']).unsqueeze(0)
+                ys_mask = subsequent_mask(i + 1).unsqueeze(0).to(enc_output.device)
+                ys = torch.tensor(hyp['yseq']).unsqueeze(0).to(enc_output.device)
                 # FIXME: jit does not match non-jit result
                 if use_jit:
                     if traced_decoder is None:
@@ -378,6 +373,8 @@ class E2E(ASRInterface, torch.nn.Module):
                     local_att_scores = traced_decoder(ys, ys_mask, enc_output)[0]
                 else:
                     local_att_scores = self.decoder.forward_one_step(ys, ys_mask, enc_output)[0]
+
+                local_att_scores = local_att_scores.cpu()
 
                 if rnnlm:
                     rnnlm_state, local_lm_scores = rnnlm.predict(hyp['rnnlm_prev'], vy)
@@ -389,7 +386,8 @@ class E2E(ASRInterface, torch.nn.Module):
                     local_best_scores, local_best_ids = torch.topk(
                         local_att_scores, ctc_beam, dim=1)
                     ctc_scores, ctc_states = ctc_prefix_score(
-                        hyp['yseq'], local_best_ids[0], hyp['ctc_state_prev'])
+                        hyp['yseq'], local_best_ids[0], hyp['ctc_state_prev']
+                    )
                     local_scores = \
                         (1.0 - ctc_weight) * local_att_scores[:, local_best_ids[0]] \
                         + ctc_weight * torch.from_numpy(ctc_scores - hyp['ctc_score_prev'])
@@ -400,7 +398,7 @@ class E2E(ASRInterface, torch.nn.Module):
                 else:
                     local_best_scores, local_best_ids = torch.topk(local_scores, beam, dim=1)
 
-                for j in six.moves.range(beam):
+                for j in range(beam):
                     new_hyp = {}
                     new_hyp['score'] = hyp['score'] + float(local_best_scores[0, j])
                     new_hyp['yseq'] = [0] * (1 + len(hyp['yseq']))

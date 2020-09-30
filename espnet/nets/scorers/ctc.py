@@ -33,7 +33,7 @@ class CTCPrefixScorer(PartialScorerInterface):
         """
         logp = self.ctc.log_softmax(x.unsqueeze(0)).detach().squeeze(0).cpu().numpy()
         # TODO(karita): use CTCPrefixScoreTH
-        self.impl = CTCPrefixScore(logp, 0, self.eos, np)
+        self.impl = CTCPrefixScore(logp, 0, self.eos)
         return 0, self.impl.initial_state()
 
     def select_state(self, state, i):
