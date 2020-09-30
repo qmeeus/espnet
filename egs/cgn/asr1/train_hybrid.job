@@ -5,7 +5,7 @@ RequestCpus         = 1
 RequestMemory       = 8G
 +RequestWallTime    = 86400
 Request_GPUs        = 1
-Requirements        = ( CUDAGlobalMemoryMB > 10000 )
+Requirements        = ( CUDAGlobalMemoryMB > 8000 )
 
 Initialdir          = /esat/spchdisk/scratch/qmeeus/repos/espnet/egs/cgn/asr1 
 Executable          = train_hybrid.sh 
