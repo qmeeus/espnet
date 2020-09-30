@@ -5,9 +5,9 @@
 #  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
 
 import logging
-
+import os
 import matplotlib.pyplot as plt
-import numpy
+import numpy as np
 
 from espnet.asr import asr_utils
 
@@ -15,41 +15,36 @@ plt.switch_backend('Agg')
 
 
 def _plot_and_save_attention(att_w, filename, xtokens=None, ytokens=None):
+    # TODO: seaborn's heatmap is so much better at doing all this in one line...
     # dynamically import matplotlib due to not found error
     from matplotlib.ticker import MaxNLocator
-    import os
-    d = os.path.dirname(filename)
-    if not os.path.exists(d):
-        os.makedirs(d)
-    w, h = plt.figaspect(1.0 / len(att_w))
-    fig = plt.Figure(figsize=(w * 2, h * 2))
-    axes = fig.subplots(1, len(att_w))
-    if len(att_w) == 1:
-        axes = [axes]
-    for ax, aw in zip(axes, att_w):
-        # plt.subplot(1, len(att_w), h)
-        ax.imshow(aw.astype(numpy.float32), aspect="auto")
-        ax.set_xlabel("Input")
-        ax.set_ylabel("Output")
-        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-        # Labels for major ticks
-        if xtokens is not None:
-            ax.set_xticks(numpy.linspace(0, len(xtokens) - 1, len(xtokens)))
-            ax.set_xticks(numpy.linspace(0, len(xtokens) - 1, 1), minor=True)
-            ax.set_xticklabels(xtokens + [''], rotation=40)
-        if ytokens is not None:
-            ax.set_yticks(numpy.linspace(0, len(ytokens) - 1, len(ytokens)))
-            ax.set_yticks(numpy.linspace(0, len(ytokens) - 1, 1), minor=True)
-            ax.set_yticklabels(ytokens + [''])
+
+    os.makedirs(os.path.dirname(filename), exist_ok=True)
     
-    fig.tight_layout()
+    w, h = plt.figaspect(1.0 / len(att_w))
+    
+    # Axes -> np.ndarray with 2 dims
+    fig, axes = plt.subplots(1, len(att_w), figsize=(w * 2, h * 2), squeeze=False)
+    
+    for i, aw in enumerate(att_w):
+        ax = axes[0, i % len(att_w)]
+        ax.imshow(aw.astype(np.float32), aspect="auto")
+
+        for axis, tokens, label, r in [(ax.xaxis, xtokens, "Input", 40), (ax.yaxis, ytokens, "Output", 0)]:
+            axis.set_label(label)
+            axis.set_major_locator(MaxNLocator(integer=True))
+            if tokens is not None:
+                axis.set_ticks(np.linspace(0, len(tokens) - 1, len(tokens)))
+                axis.set_ticks(np.linspace(0, len(tokens) - 1, 1), minor=True)
+                axis.set_ticklabels(tokens + [''], rotation=r)
+    
+    fig.set_tight_layout(True)
     return fig
 
 
 def savefig(plot, filename):
     plot.savefig(filename)
-    plt.clf()
+    plt.close('all')
 
 
 def plot_multi_head_attention(data, attn_dict, outdir, suffix="png", savefn=savefig,
