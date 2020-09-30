@@ -24,6 +24,10 @@ def load_dictionary(args):
         char_list.insert(0, blank)
     if eos not in char_list:
         char_list.append(eos)
+
+    if hasattr(args, "decoder_mode") and args.decoder_mode == "maskctc":
+        char_list.append("<mask>")
+    
     return char_list
 
 

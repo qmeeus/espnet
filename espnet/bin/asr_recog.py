@@ -121,6 +121,19 @@ def get_parser():
                         help='Onset margin')
     parser.add_argument('--streaming-offset-margin', type=int, default=1,
                         help='Offset margin')
+    parser.add_argument(
+        "--maskctc-n-iterations",
+        type=int,
+        default=10,
+        help="Number of decoding iterations."
+        "For Mask CTC, set 0 to predict 1 mask/iter.",
+    )
+    parser.add_argument(
+        "--maskctc-probability-threshold",
+        type=float,
+        default=0.999,
+        help="Threshold probability for CTC output",
+    )
     return parser
 
 
@@ -175,7 +188,8 @@ def main(args):
     logging.info('backend = ' + args.backend)
     # Experimental API that supports custom LMs
 
-    from espnet.asr.pytorch_backend.recog import recog
+    from espnet.asr.pytorch_backend.asr import recog
+    # from espnet.asr.pytorch_backend.recog import recog
     # if args.api == "v2":
     #     from espnet.asr.pytorch_backend.recog import recog_v2 as recog
     # else:

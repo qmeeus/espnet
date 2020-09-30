@@ -341,7 +341,12 @@ def recog(args):
                 feat = load_inputs_and_targets(batch)
                 feat = feat[0][0] if args.num_encs == 1 else [feat[idx][0] for idx in range(model.num_encs)]
                 feat = torch.as_tensor(feat).to(device)
-                nbest_hyps = model.recognize(feat, args, train_args.char_list, rnnlm)
+                if hasattr(model, "decoder_mode") and model.decoder_mode == "maskctc":
+                    nbest_hyps = model.recognize_maskctc(
+                        feat, args, train_args.char_list
+                    )
+                else:
+                    nbest_hyps = model.recognize(feat, args, train_args.char_list, rnnlm)
                 new_js[name] = add_results_to_json(js[name], nbest_hyps, train_args.char_list)
 
     else:

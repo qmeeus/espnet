@@ -35,7 +35,8 @@ transformer-warmup-steps: 25000
 transformer-attn-dropout-rate: 0.0
 transformer-length-normalized-loss: false
 transformer-init: pytorch
+decoder-mode: maskctc
 
-report-cer: false
-report-wer: false 
+report-cer: true 
+report-wer: true 
 

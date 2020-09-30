@@ -9,7 +9,7 @@ from distutils.util import strtobool
 import logging
 import math
 import numpy as np
-
+from itertools import groupby
 import torch
 
 from espnet.nets.asr_interface import ASRInterface
@@ -19,7 +19,7 @@ from espnet.nets.pytorch_backend.e2e_asr import Reporter
 from espnet.nets.pytorch_backend.nets_utils import get_subsample
 from espnet.nets.pytorch_backend.nets_utils import make_non_pad_mask
 from espnet.nets.pytorch_backend.nets_utils import th_accuracy
-from espnet.nets.pytorch_backend.transformer.add_sos_eos import add_sos_eos
+from espnet.nets.pytorch_backend.transformer.add_sos_eos import add_sos_eos, mask_uniform
 from espnet.nets.pytorch_backend.transformer.attention import MultiHeadedAttention
 from espnet.nets.pytorch_backend.transformer.decoder import Decoder
 from espnet.nets.pytorch_backend.transformer.encoder import Encoder
@@ -48,39 +48,112 @@ class E2E(ASRInterface, torch.nn.Module):
         """Add arguments."""
         group = parser.add_argument_group("transformer model setting")
 
-        group.add_argument("--transformer-init", type=str, default="pytorch",
-                           choices=["pytorch", "xavier_uniform", "xavier_normal",
-                                    "kaiming_uniform", "kaiming_normal"],
-                           help='how to initialize transformer parameters')
-        group.add_argument("--transformer-input-layer", type=str, default="conv2d",
-                           choices=["conv2d", "linear", "embed"],
-                           help='transformer input layer type')
-        group.add_argument('--transformer-attn-dropout-rate', default=None, type=float,
-                           help='dropout in transformer attention. use --dropout-rate if None is set')
-        group.add_argument('--transformer-lr', default=10.0, type=float,
-                           help='Initial value of learning rate')
-        group.add_argument('--transformer-warmup-steps', default=25000, type=int,
-                           help='optimizer warmup steps')
-        group.add_argument('--transformer-length-normalized-loss', default=True, type=strtobool,
-                           help='normalize loss by length')
-        group.add_argument('--dropout-rate', default=0.0, type=float, help='Dropout rate')
+        group.add_argument(
+            "--transformer-init",
+            type=str,
+            default="pytorch",
+            choices=[
+                "pytorch",
+                "xavier_uniform",
+                "xavier_normal",
+                "kaiming_uniform",
+                "kaiming_normal",
+            ],
+            help="how to initialize transformer parameters",
+        )
+        group.add_argument(
+            "--transformer-input-layer",
+            type=str,
+            default="conv2d",
+            choices=["conv2d", "linear", "embed"],
+            help="transformer input layer type",
+        )
+        group.add_argument(
+            "--transformer-attn-dropout-rate",
+            default=None,
+            type=float,
+            help="dropout in transformer attention. use --dropout-rate if None is set",
+        )
+        group.add_argument(
+            "--transformer-lr",
+            default=10.0,
+            type=float,
+            help="Initial value of learning rate",
+        )
+        group.add_argument(
+            "--transformer-warmup-steps",
+            default=25000,
+            type=int,
+            help="optimizer warmup steps",
+        )
+        group.add_argument(
+            "--transformer-length-normalized-loss",
+            default=True,
+            type=strtobool,
+            help="normalize loss by length",
+        )
+        group.add_argument(
+            "--dropout-rate",
+            default=0.0,
+            type=float,
+            help="Dropout rate for the encoder",
+        )
         # Encoder
-        group.add_argument('--elayers', default=4, type=int,
-                           help='Number of encoder layers (for shared recognition part in multi-speaker asr mode)')
-        group.add_argument('--eunits', '-u', default=300, type=int,
-                           help='Number of encoder hidden units')
+        group.add_argument(
+            "--elayers",
+            default=4,
+            type=int,
+            help="Number of encoder layers (for shared recognition part "
+            "in multi-speaker asr mode)",
+        )
+        group.add_argument(
+            "--eunits",
+            "-u",
+            default=300,
+            type=int,
+            help="Number of encoder hidden units",
+        )
         # Attention
-        group.add_argument('--adim', default=320, type=int,
-                           help='Number of attention transformation dimensions')
-        group.add_argument('--aheads', default=4, type=int,
-                           help='Number of heads for multi head attention')
+        group.add_argument(
+            "--adim",
+            default=320,
+            type=int,
+            help="Number of attention transformation dimensions",
+        )
+        group.add_argument(
+            "--aheads",
+            default=4,
+            type=int,
+            help="Number of heads for multi head attention",
+        )
         # Decoder
-        group.add_argument('--dlayers', default=1, type=int,
-                           help='Number of decoder layers')
-        group.add_argument('--dunits', default=320, type=int,
-                           help='Number of decoder hidden units')
-        group.add_argument('--sampling-probability', default=0.0, type=float,
-                           help='Ratio of predicted labels fed back to decoder')
+        group.add_argument(
+            '--dlayers', 
+            default=1, 
+            type=int,
+            help='Number of decoder layers'
+        )
+        group.add_argument(
+            '--dunits', 
+            default=320, 
+            type=int,
+            help='Number of decoder hidden units'
+        )
+        # Non-autoregressive training
+        group.add_argument(
+            "--decoder-mode",
+            default="AR",
+            type=str,
+            choices=["ar", "maskctc"],
+            help="AR: standard autoregressive training, "
+            "maskctc: non-autoregressive training based on Mask CTC",
+        )
+        group.add_argument(
+            '--sampling-probability', 
+            default=0.0, 
+            type=float,
+            help='Ratio of predicted labels fed back to decoder'
+        )
         return parser
 
     @property
@@ -103,14 +176,13 @@ class E2E(ASRInterface, torch.nn.Module):
 
         self.char_list = args.char_list
         
+        self.decoder_mode = args.decoder_mode
         # HACK: error prone: char_list can only be None when working with vectors
         if self.char_list:
             self.sos = self.eos = self.char_list.index("</s>")
-            try: # HACK (temporary)
-                self.pad = self.char_list.index("<pad>")
-            except ValueError:
-                self.pad = None
+            self.pad = self.char_list.index("<pad>") if "<pad>" in self.char_list else None
             self.blank = self.char_list.index(args.sym_blank)
+            self.mask_token = self.char_list.index("<mask>") if "<mask>" in self.char_list else None
 
         self.odim = odim
         self.ignore_id = ignore_id
@@ -208,23 +280,19 @@ class E2E(ASRInterface, torch.nn.Module):
         hs_pad, hs_mask = self.encoder(xs_pad, src_mask)
 
         # 2. forward decoder
-        ys_in_pad, ys_out_pad = add_sos_eos(ys_pad, self.sos, self.eos, self.ignore_id)
-
-        if not use_teacher_forcing or np.random.rand() < self.sampling_probability:
-            logging.info("Using decoder's output as next step's input")
-            ys = ys_in_pad[:, :1]
-            pred_pad = torch.zeros((bs, olen + 1, self.decoder.output_dim)).type_as(xs_pad)
-            cache = None
-
-            for i in range(olen + 1):
-                
-                pred_mask = subsequent_mask(i+1).type_as(ys).unsqueeze(0).repeat(bs, 1, 1)
-                pred_pad[:, i, :], cache = self.decoder.forward_one_step(ys, pred_mask, hs_pad, cache)
-                ys = torch.cat([ys, pred_pad[:, i, :].argmax(-1, keepdim=True)], axis=1)
-
+        if self.decoder_mode == "mask_ctc":
+            ys_in_pad, ys_out_pad = mask_uniform(
+                ys_pad, self.mask_token, self.eos, self.ignore_id
+            )
+            ys_mask = (ys_in_pad != self.ignore_id).unsqueeze(-2)
         else:
+            ys_in_pad, ys_out_pad = add_sos_eos(
+                ys_pad, self.sos, self.eos, self.ignore_id
+            )
+
             ys_mask = target_mask(ys_in_pad, self.ignore_id)
-            pred_pad, pred_mask = self.decoder(ys_in_pad, ys_mask, hs_pad, hs_mask)
+
+        pred_pad, pred_mask = self.decoder(ys_in_pad, ys_mask, hs_pad, hs_mask)
             
         # 3. compute attention loss
         loss_att = self.criterion(pred_pad, ys_out_pad)
@@ -342,7 +410,7 @@ class E2E(ASRInterface, torch.nn.Module):
         if lpz is not None:
             from espnet.nets.ctc_prefix_score import CTCPrefixScore
 
-            ctc_prefix_score = CTCPrefixScore(lpz.cpu().detach().numpy(), 0, self.eos, np)
+            ctc_prefix_score = CTCPrefixScore(lpz.cpu().detach().numpy(), 0, self.eos)
             hyp['ctc_state_prev'] = ctc_prefix_score.initial_state()
             hyp['ctc_score_prev'] = 0.0
             if ctc_weight != 1.0:
@@ -478,6 +546,97 @@ class E2E(ASRInterface, torch.nn.Module):
         logging.info('total log probability: ' + str(nbest_hyps[0]['score']))
         logging.info('normalized log probability: ' + str(nbest_hyps[0]['score'] / len(nbest_hyps[0]['yseq'])))
         return nbest_hyps
+
+    def recognize_maskctc(self, x, recog_args, char_list=None):
+        """Non-autoregressive decoding using Mask CTC.
+
+        :param ndnarray x: input acoustic feature (B, T, D) or (T, D)
+        :param Namespace recog_args: argment Namespace contraining options
+        :param list char_list: list of characters
+        :return: decoding result
+        :rtype: list
+        """
+        self.eval()
+        h = self.encode(x).unsqueeze(0)
+
+        ctc_probs, ctc_ids = torch.exp(self.ctc.log_softmax(h)).max(dim=-1)
+        y_hat = torch.stack([x[0] for x in groupby(ctc_ids[0])])
+        y_idx = torch.nonzero(y_hat != 0).squeeze(-1)
+
+        probs_hat = []
+        cnt = 0
+        for i, y in enumerate(y_hat.tolist()):
+            probs_hat.append(-1)
+            while cnt < ctc_ids.shape[1] and y == ctc_ids[0][cnt]:
+                if probs_hat[i] < ctc_probs[0][cnt]:
+                    probs_hat[i] = ctc_probs[0][cnt].item()
+                cnt += 1
+        probs_hat = torch.from_numpy(np.array(probs_hat))
+
+        char_mask = "_"
+        p_thres = recog_args.maskctc_probability_threshold
+        mask_idx = torch.nonzero(probs_hat[y_idx] < p_thres).squeeze(-1)
+        confident_idx = torch.nonzero(probs_hat[y_idx] >= p_thres).squeeze(-1)
+        mask_num = len(mask_idx)
+
+        y_in = torch.zeros(1, len(y_idx) + 1, dtype=torch.long) + self.mask_token
+        y_in[0][confident_idx] = y_hat[y_idx][confident_idx]
+        y_in[0][-1] = self.eos
+
+        logging.info(
+            "ctc:{}".format(
+                "".join(
+                    [
+                        char_list[y] if y != self.mask_token else char_mask
+                        for y in y_in[0].tolist()
+                    ]
+                ).replace("<space>", " ")
+            )
+        )
+
+        if not mask_num == 0:
+            K = recog_args.maskctc_n_iterations
+            num_iter = K if mask_num >= K and K > 0 else mask_num
+
+            for t in range(1, num_iter):
+                pred, _ = self.decoder(
+                    y_in, (y_in != self.ignore_id).unsqueeze(-2), h, None
+                )
+                pred_sc, pred_id = pred[0][mask_idx].max(dim=-1)
+                cand = torch.topk(pred_sc, mask_num // num_iter, -1)[1]
+                y_in[0][mask_idx[cand]] = pred_id[cand]
+                mask_idx = torch.nonzero(y_in[0] == self.mask_token).squeeze(-1)
+
+                logging.info(
+                    "msk:{}".format(
+                        "".join(
+                            [
+                                char_list[y] if y != self.mask_token else char_mask
+                                for y in y_in[0].tolist()
+                            ]
+                        ).replace("<space>", " ")
+                    )
+                )
+
+            pred, pred_mask = self.decoder(
+                y_in, (y_in != self.ignore_id).unsqueeze(-2), h, None
+            )
+            y_in[0][mask_idx] = pred[0][mask_idx].argmax(dim=-1)
+            logging.info(
+                "msk:{}".format(
+                    "".join(
+                        [
+                            char_list[y] if y != self.mask_token else char_mask
+                            for y in y_in[0].tolist()
+                        ]
+                    ).replace("<space>", " ")
+                )
+            )
+
+        ret = y_in.tolist()[0][:-1]
+        hyp = {"score": 0.0, "yseq": [self.sos] + ret + [self.eos]}
+
+        return [hyp]
 
     def calculate_all_attentions(self, xs_pad, ilens, ys_pad):
         """E2E attention calculation.
