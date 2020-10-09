@@ -237,12 +237,12 @@ def main(cmd_args):
 
     # logging info
     if args.verbose > 0:
+        loglevel = logging.getLevelName(args.verbose)
         logging.basicConfig(
-            level=logging.INFO, format='%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s')
+            level=loglevel, format='%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s')
     else:
         logging.basicConfig(
-            level=logging.WARN, format='%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s')
-        logging.warning('Skip DEBUG/INFO messages')
+            level=logging.INFO, format='%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s')
 
     count_gpus(args)
 

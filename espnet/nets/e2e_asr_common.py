@@ -17,7 +17,10 @@ from itertools import groupby
 from operator import itemgetter
 
 
-def tokens2text(tokens, char_list, ignore_indices=(0, 1, -1), space_symbol="▁", return_sentence=True, is_ctc=False):
+SPACE = "▁"
+
+
+def tokens2text(tokens, char_list, ignore_indices=(0, 1, -1), space_symbol=SPACE, return_sentence=True, is_ctc=False):
     
     def token2string(token): return char_list[int(token)]
     def filter_token(token): return token not in ignore_indices
@@ -34,7 +37,7 @@ def tokens2text(tokens, char_list, ignore_indices=(0, 1, -1), space_symbol="▁"
     
     if return_sentence:
         # Create the sentence
-        return "".join(tokens).replace(space_symbol, " ")
+        return "".join(tokens).replace(space_symbol, " ").strip()
     
     return list(tokens)
 

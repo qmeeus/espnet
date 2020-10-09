@@ -33,7 +33,7 @@ class CustomConverter(object):
         """
         # batch should be located in list
         assert len(batch) == 1
-        xs, ys = batch[0]
+        xs, targets = batch[0]
 
         # perform subsampling
         if self.subsampling_factor > 1:
@@ -58,13 +58,24 @@ class CustomConverter(object):
             xs_pad = pad_list([torch.from_numpy(x).float() for x in xs], 0).to(device, dtype=self.dtype)
 
         ilens = torch.from_numpy(ilens).to(device)
+        
+        return_batch = (xs_pad, ilens)
 
-        if ys[0].ndim > 1:
-            ys_pad = pad_list(list(map(torch.tensor, ys)), 0).to(device)
-        else:
+        def pad_target(target):
+            if target[0].ndim > 1:
+                return pad_list(list(map(torch.tensor, target)), 0).to(device)
+
             # NOTE: this is for multi-output (e.g., speech translation)
-            ys_pad = pad_list([
-                torch.from_numpy(np.array(y[0][:]) if isinstance(y, tuple) else y).long() for y in ys
+            return pad_list([
+                torch.from_numpy(np.array(y[0][:]) if isinstance(y, tuple) else y).long() 
+                for y in target
             ], self.ignore_id).to(device)
 
-        return xs_pad, ilens, ys_pad
+        if isinstance(targets, zip):
+            # HACK: multioutput
+            for ys in zip(*targets):
+                return_batch += (pad_target(ys),)
+            return return_batch
+
+        return_batch += (pad_target(targets),)
+        return return_batch

@@ -207,7 +207,8 @@ def train(args):
         return
 
     # MODEL AND OPTIMIZER CONFIGURATION
-    model = build_model(idim_list, odim, args)
+    assert type(args.char_list) == list
+    model = build_model(idim_list, len(args.char_list), args)
         
     reporter = model.reporter
     model = model.to(device=device, dtype=dtype)

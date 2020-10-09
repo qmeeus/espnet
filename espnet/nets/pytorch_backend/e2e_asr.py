@@ -515,7 +515,7 @@ class E2E(ASRInterface, torch.nn.Module):
         # subsample frame
         xs = [xx[::self.subsample[0], :] for xx in xs]
         xs = [to_device(self, to_torch_tensor(xx).float()) for xx in xs]
-        xs_pad = pad_list(xs, 0.0)
+        xs_pad = pad_list(xs, 0.)
 
         # 0. Frontend
         if self.frontend is not None:
@@ -560,7 +560,7 @@ class E2E(ASRInterface, torch.nn.Module):
         # subsample frame
         xs = [xx[::self.subsample[0], :] for xx in xs]
         xs = [to_device(self, to_torch_tensor(xx).float()) for xx in xs]
-        xs_pad = pad_list(xs, 0.0)
+        xs_pad = pad_list(xs, 0.)
         enhanced, hlensm, mask = self.frontend(xs_pad, ilens)
         if prev:
             self.train()
