@@ -10,6 +10,7 @@ import logging
 import math
 import numpy as np
 from itertools import groupby
+from operator import itemgetter
 import torch
 
 from espnet.nets.asr_interface import ASRInterface
@@ -29,6 +30,7 @@ from espnet.nets.pytorch_backend.transformer.mask import subsequent_mask
 from espnet.nets.pytorch_backend.transformer.mask import target_mask
 from espnet.nets.pytorch_backend.transformer.plot import PlotAttentionReport
 from espnet.nets.scorers.ctc import CTCPrefixScorer
+from espnet.nets.e2e_asr_common import SPACE
 
 
 class E2E(ASRInterface, torch.nn.Module):
@@ -128,14 +130,14 @@ class E2E(ASRInterface, torch.nn.Module):
         )
         # Decoder
         group.add_argument(
-            '--dlayers', 
-            default=1, 
+            '--dlayers',
+            default=1,
             type=int,
             help='Number of decoder layers'
         )
         group.add_argument(
-            '--dunits', 
-            default=320, 
+            '--dunits',
+            default=320,
             type=int,
             help='Number of decoder hidden units'
         )
@@ -149,8 +151,8 @@ class E2E(ASRInterface, torch.nn.Module):
             "maskctc: non-autoregressive training based on Mask CTC",
         )
         group.add_argument(
-            '--sampling-probability', 
-            default=0.0, 
+            '--sampling-probability',
+            default=0.0,
             type=float,
             help='Ratio of predicted labels fed back to decoder'
         )
@@ -175,7 +177,7 @@ class E2E(ASRInterface, torch.nn.Module):
         self.decoder = self.build_decoder(odim, args)
 
         self.char_list = args.char_list
-        
+
         self.decoder_mode = args.decoder_mode
         # HACK: error prone: char_list can only be None when working with vectors
         if self.char_list:
@@ -241,22 +243,21 @@ class E2E(ASRInterface, torch.nn.Module):
 
     def build_ctc_layer(self, args):
         return CTC(
-            odim=self.odim, 
-            eprojs=args.adim, 
-            dropout_rate=args.dropout_rate, 
-            ctc_type=args.ctc_type, 
+            odim=self.odim if self.mask_token is None else self.odim - 1,
+            eprojs=args.adim,
+            dropout_rate=args.dropout_rate,
+            ctc_type=args.ctc_type,
             reduce=True
         )
 
     def build_error_calculator(self, args):
-        if args.report_cer or args.report_wer:
-            from espnet.nets.e2e_asr_common import ErrorCalculator
-            return ErrorCalculator(
-                args.char_list,
-                args.sym_space, 
-                args.sym_blank,
-                args.report_cer, args.report_wer
-            )
+        from espnet.nets.e2e_asr_common import ErrorCalculator
+        return ErrorCalculator(
+            args.char_list,
+            args.sym_space,
+            args.sym_blank,
+            args.report_cer, args.report_wer
+        )
 
     def forward(self, xs_pad, ilens, ys_pad, use_teacher_forcing=True):
         """E2E forward.
@@ -293,7 +294,7 @@ class E2E(ASRInterface, torch.nn.Module):
             ys_mask = target_mask(ys_in_pad, self.ignore_id)
 
         pred_pad, pred_mask = self.decoder(ys_in_pad, ys_mask, hs_pad, hs_mask)
-            
+
         # 3. compute attention loss
         loss_att = self.criterion(pred_pad, ys_out_pad)
         acc = th_accuracy(pred_pad.view(-1, self.odim), ys_out_pad, ignore_label=self.ignore_id)
@@ -558,20 +559,15 @@ class E2E(ASRInterface, torch.nn.Module):
         """
         self.eval()
         h = self.encode(x).unsqueeze(0)
-
         ctc_probs, ctc_ids = torch.exp(self.ctc.log_softmax(h)).max(dim=-1)
-        y_hat = torch.stack([x[0] for x in groupby(ctc_ids[0])])
-        y_idx = torch.nonzero(y_hat != 0).squeeze(-1)
 
-        probs_hat = []
-        cnt = 0
-        for i, y in enumerate(y_hat.tolist()):
-            probs_hat.append(-1)
-            while cnt < ctc_ids.shape[1] and y == ctc_ids[0][cnt]:
-                if probs_hat[i] < ctc_probs[0][cnt]:
-                    probs_hat[i] = ctc_probs[0][cnt].item()
-                cnt += 1
-        probs_hat = torch.from_numpy(np.array(probs_hat))
+        y_hat, probs_hat = map(torch.tensor, zip(
+            *map(lambda group: (group[0], max(map(itemgetter(1), group[1]))), groupby(
+                zip(ctc_ids.squeeze(0), ctc_probs.squeeze(0)), key=lambda x: x[0]
+            ))
+        ))
+
+        y_idx = torch.nonzero(y_hat != 0).squeeze(-1)
 
         char_mask = "_"
         p_thres = recog_args.maskctc_probability_threshold
@@ -590,7 +586,7 @@ class E2E(ASRInterface, torch.nn.Module):
                         char_list[y] if y != self.mask_token else char_mask
                         for y in y_in[0].tolist()
                     ]
-                ).replace("<space>", " ")
+                ).replace(SPACE, " ")
             )
         )
 
@@ -614,7 +610,7 @@ class E2E(ASRInterface, torch.nn.Module):
                                 char_list[y] if y != self.mask_token else char_mask
                                 for y in y_in[0].tolist()
                             ]
-                        ).replace("<space>", " ")
+                        ).replace(SPACE, " ")
                     )
                 )
 
@@ -629,7 +625,7 @@ class E2E(ASRInterface, torch.nn.Module):
                             char_list[y] if y != self.mask_token else char_mask
                             for y in y_in[0].tolist()
                         ]
-                    ).replace("<space>", " ")
+                    ).replace(SPACE, " ")
                 )
             )
 
