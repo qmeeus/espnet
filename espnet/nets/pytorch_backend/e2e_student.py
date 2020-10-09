@@ -1,0 +1,574 @@
+# Copyright 2019 Shigeki Karita
+#  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
+
+"""Transformer speech recognition model (pytorch)."""
+
+from argparse import Namespace
+from distutils.util import strtobool
+
+import logging
+import math
+import numpy as np
+import re
+import torch
+
+from espnet.nets.asr_interface import ASRInterface
+from espnet.nets.pytorch_backend.ctc import CTC
+from espnet.nets.pytorch_backend.e2e_asr import CTC_LOSS_THRESHOLD
+from espnet.nets.pytorch_backend.e2e_asr import Reporter
+from espnet.nets.pytorch_backend.nets_utils import get_subsample
+from espnet.nets.pytorch_backend.nets_utils import make_non_pad_mask
+from espnet.nets.pytorch_backend.nets_utils import th_accuracy
+from espnet.nets.pytorch_backend.transformer.add_sos_eos import add_sos_eos, mask_uniform
+from espnet.nets.pytorch_backend.transformer.attention import MultiHeadedAttention
+from espnet.nets.pytorch_backend.transformer.decoder import Decoder
+from espnet.nets.pytorch_backend.transformer.encoder import Encoder
+from espnet.nets.pytorch_backend.transformer.initializer import initialize
+from espnet.nets.pytorch_backend.transformer.label_smoothing_loss import LabelSmoothingLoss
+from espnet.nets.pytorch_backend.transformer.mask import subsequent_mask
+from espnet.nets.pytorch_backend.transformer.mask import target_mask
+from espnet.nets.pytorch_backend.transformer.plot import PlotAttentionReport
+from espnet.nets.pytorch_backend.e2e_asr_transformer import E2E as BaseE2E
+from espnet.nets.scorers.ctc import CTCPrefixScorer
+from espnet.nets.e2e_asr_common import tokens2text
+
+
+class E2E(BaseE2E, torch.nn.Module):
+
+    @staticmethod
+    def add_arguments(parser):
+        parser = BaseE2E.add_arguments(parser)
+        group = parser._action_groups[-1]
+        # group.add_argument("--teacher-model", type=str, default="distilbert-base-multilingual-cased")
+        group.add_argument("--teacher-model", type=str, default="wietsedv/bert-base-dutch-cased")
+        return parser
+
+    def __init__(self, idim, odim, args, ignore_id=-1):
+        """Construct an E2E object.
+
+        :param int idim: dimension of inputs
+        :param int odim: dimension of outputs
+        :param Namespace args: argument Namespace containing options
+        """
+        torch.nn.Module.__init__(self)
+        self.sampling_probability = args.sampling_probability
+
+        self.char_list = args.char_list        
+        # TODO: should be removed
+        if self.char_list:
+            self.sos = self.eos = self.char_list.index("</s>")
+            self.pad = self.char_list.index("<pad>") if "<pad>" in self.char_list else None
+            self.blank = self.char_list.index(args.sym_blank)
+            self.mask_token = self.char_list.index("<mask>") if "<mask>" in self.char_list else None
+
+        self.encoder = self.build_encoder(idim, args)
+        self.odim = odim  # For ctc
+        self.ctc = self.build_ctc_layer(args)
+
+        self.decoder, self.tokenizer, self.data_collator = self.load_teacher(
+            args.teacher_model, freeze=["bert.embeddings", "bert.encoder.layer.\d+.attention"]
+        )
+        
+        if self.encoder.hidden_dim != self.decoder.config.hidden_size:
+            self.encoder_projection = torch.nn.Linear(
+                self.encoder.hidden_dim, self.decoder.config.hidden_size)
+        else:
+            self.encoder_projection = None
+
+        self.odim = self.tokenizer.vocab_size  # For criterion
+        self.ignore_id = -100  # Transformers hard coded value
+
+        self.criterion = self.build_criterion(args)
+
+        self.subsample = get_subsample(args, mode='asr', arch='transformer')
+        self.reporter = Reporter()
+
+        # self.verbose = args.verbose
+        self.reset_parameters(args)
+        self.adim = args.adim
+        self.mtlalpha = args.mtlalpha
+        self.report_cer = args.report_cer
+        self.report_wer = args.report_wer
+        self.error_calculator = self.build_error_calculator(args)
+
+        self.rnnlm = None
+
+    def reset_parameters(self, args):
+        """Initialize parameters."""
+        # initialize parameters
+        initialize(self, args.transformer_init)
+
+    def load_teacher(self, teacher_model_identifier, freeze=True):
+        from transformers import (
+            AutoModelForMaskedLM, AutoTokenizer, AutoConfig, DataCollatorForLanguageModeling
+        )
+
+        tokenizer = AutoTokenizer.from_pretrained(teacher_model_identifier)
+        collator = DataCollatorForLanguageModeling(tokenizer, mlm=True, mlm_probability=0.15)
+
+        config = AutoConfig.from_pretrained(teacher_model_identifier)
+        config.is_decoder = True
+        config.add_cross_attention = True
+        config.attention_probs_dropout_prob = 0.
+        config.output_attentions = True
+        teacher = AutoModelForMaskedLM.from_pretrained(teacher_model_identifier, config=config)
+        
+        if freeze:
+            # True: teacher; List: all matching elements; Regex: matching modules
+            self.freeze_layer(teacher, freeze)
+
+        return teacher, tokenizer, collator
+
+    def convert_token_ids_to_string(self, token_ids):
+        assert token_ids.ndim == 1
+        return self.tokenizer.convert_tokens_to_string(
+            self.tokenizer.convert_ids_to_tokens(token_ids)
+        )
+
+    @staticmethod
+    def freeze_layer(model, pattern=True):
+        def _freeze(layer):
+            for p in layer.parameters():
+                p.requires_grad = False
+
+        if pattern is True:
+            _freeze(model)
+            return
+
+        if type(pattern) is list:
+            pattern = "|".join(f"({pat})" for pat in pattern)
+
+        pattern = f"^{pattern}$"  # Exact matches only!
+        for name, module in model.named_modules():
+            if re.match(pattern, name):
+                logging.info(f"Freezing teacher.{name}")
+                _freeze(module)
+
+    def forward(self, xs_pad, ilens, ys_pad, use_teacher_forcing=True):
+        """E2E forward.
+
+        :param torch.Tensor xs_pad: batch of padded source sequences (B, Tmax, idim)
+        :param torch.Tensor ilens: batch of lengths of source sequences (B)
+        :param torch.Tensor ys_pad: batch of padded target sequences (B, Lmax)
+        :return: ctc loass value
+        :rtype: torch.Tensor
+        :return: attention loss value
+        :rtype: torch.Tensor
+        :return: accuracy in attention decoder
+        :rtype: float
+        """
+
+        bs, olen = ys_pad.size()
+        device = xs_pad.device
+
+        # 1. forward encoder
+        xs_pad = xs_pad[:, :max(ilens)]  # for data parallel
+        src_mask = make_non_pad_mask(ilens.tolist()).to(device).unsqueeze(-2)
+        hs_pad, hs_mask = self.encoder(xs_pad, src_mask)
+        hs_proj = self.encoder_projection(hs_pad) if self.encoder_projection else hs_pad
+        # hs_proj.masked_fill_(hs_mask, 0)
+
+        # HACK: turn back tokens to texts then texts to bert's tokens
+        texts = [
+            tokens2text(tokens, self.char_list) for tokens in ys_pad
+        ]
+
+        # decoder_inputs = self.tokenizer.batch_encode_plus(
+        #     texts, add_special_tokens=True, return_tensors="pt", padding=True
+        # ).to(device)
+
+        # 2. forward decoder
+        inputs = {k: v.to(device) for k, v in self.data_collator(
+            list(map(self.tokenizer.encode, texts))
+        ).items()}
+        # labels = inputs.pop("labels")
+
+        inputs.update({
+            "attention_mask": inputs["input_ids"] != self.tokenizer.pad_token_id,
+            "encoder_hidden_states": hs_proj,
+            "encoder_attention_mask": hs_mask.squeeze(1)
+        })
+
+        import ipdb; ipdb.set_trace()
+
+        loss_att, pred_pad, att = self.decoder(**inputs)
+        if logging.getLogger().getEffectiveLevel() == 10:
+            import matplotlib.pyplot as plt; plt.switch_backend("tkagg")
+            bs = len(pred_pad)
+            nl, nh = self.decoder.config.num_hidden_layers, self.decoder.config.num_attention_heads
+            fig, axs = plt.subplots(nl, nh, figsize=(nh * 2, nl * 2))
+            for i in range(nl):
+                for j in range(nh):
+                        axs[i, j].imshow(att[i][0, j].detach().cpu())
+            plt.show()
+            for i in range(bs):
+                for name, token_ids in zip(["Target", "Prediction"], [inputs["input_ids"], pred_pad.argmax(-1)]):
+                    logging.debug(
+                        f"{name}: {self.convert_token_ids_to_string(token_ids[i])}"
+                    )
+
+        import ipdb; ipdb.set_trace()
+
+        # 3. compute attention loss
+        # loss_att = self.criterion(pred_pad, labels)
+        acc = th_accuracy(pred_pad.view(-1, self.odim), inputs["labels"], ignore_label=self.ignore_id)
+
+        # 4. compute ctc loss
+        # TODO(karita) show predicted text
+        # TODO(karita) calculate these stats
+        cer_ctc = None
+        if self.mtlalpha == 0.0:
+            loss_ctc = None
+        else:
+            batch_size = xs_pad.size(0)
+            hs_len = hs_mask.view(batch_size, -1).sum(1)
+            loss_ctc = self.ctc.compute_loss(hs_pad.view(batch_size, -1, self.adim), hs_len, ys_pad)
+            if self.error_calculator is not None:
+                ys_hat = self.ctc.argmax(hs_pad.view(batch_size, -1, self.adim)).data
+                cer_ctc = self.error_calculator(ys_hat.cpu(), ys_pad.cpu(), is_ctc=True)
+
+        # 5. compute cer/wer
+        if self.training or self.error_calculator is None:
+            cer, wer = None, None
+        else:
+            ys_hat = pred_pad.argmax(dim=-1)
+            cer, wer = self.error_calculator(ys_hat.cpu(), ys_pad.cpu())
+
+        # copyied from e2e_asr
+        alpha = self.mtlalpha
+        if alpha == 0:
+            loss = loss_att
+            loss_att_data = float(loss_att)
+            loss_ctc_data = None
+        elif alpha == 1:
+            loss = loss_ctc
+            loss_att_data = None
+            loss_ctc_data = float(loss_ctc)
+        else:
+            loss = alpha * loss_ctc + (1 - alpha) * loss_att
+            loss_att_data = float(loss_att)
+            loss_ctc_data = float(loss_ctc)
+
+        loss_data = float(loss)
+        if loss_data < CTC_LOSS_THRESHOLD and not math.isnan(loss_data):
+            self.reporter.report(
+                loss_ctc=loss_ctc_data,
+                loss_att=loss_att_data,
+                accuracy=acc,
+                cer_ctc=cer_ctc,
+                cer=cer,
+                wer=wer,
+                loss=loss_data)
+        else:
+            logging.warning('loss (=%f) is not correct', loss_data)
+            
+        return loss
+
+    def scorers(self):
+        """Scorers."""
+        return dict(decoder=self.decoder, ctc=CTCPrefixScorer(self.ctc, self.eos))
+
+    def encode(self, x):
+        """Encode acoustic features.
+
+        :param ndarray x: source acoustic feature (T, D)
+        :return: encoder outputs
+        :rtype: torch.Tensor
+        """
+        self.eval()
+        x = torch.as_tensor(x).unsqueeze(0)
+        enc_output, _ = self.encoder(x, None)
+        return enc_output.squeeze(0)
+
+    def recognize(self, x, recog_args, char_list=None, rnnlm=None, use_jit=False):
+        """Recognize input speech.
+
+        :param ndnarray x: input acoustic feature (B, T, D) or (T, D)
+        :param Namespace recog_args: argment Namespace contraining options
+        :param list char_list: list of characters
+        :param torch.nn.Module rnnlm: language model module
+        :return: N-best decoding results
+        :rtype: list
+        """
+        enc_output = self.encode(x).unsqueeze(0)
+        if recog_args.ctc_weight > 0.0:
+            lpz = self.ctc.log_softmax(enc_output)
+            lpz = lpz.squeeze(0)
+        else:
+            lpz = None
+
+        h = enc_output.squeeze(0)
+
+        logging.info('input lengths: ' + str(h.size(0)))
+        # search parms
+        beam = recog_args.beam_size
+        penalty = recog_args.penalty
+        ctc_weight = recog_args.ctc_weight
+
+        # preprare sos
+        y = self.sos
+        vy = h.new_zeros(1).long()
+
+        if recog_args.maxlenratio == 0:
+            maxlen = h.shape[0]
+        else:
+            # maxlen >= 1
+            maxlen = max(1, int(recog_args.maxlenratio * h.size(0)))
+        minlen = int(recog_args.minlenratio * h.size(0))
+        logging.info('max output length: ' + str(maxlen))
+        logging.info('min output length: ' + str(minlen))
+
+        # initialize hypothesis
+        if rnnlm:
+            hyp = {'score': 0.0, 'yseq': [y], 'rnnlm_prev': None}
+        else:
+            hyp = {'score': 0.0, 'yseq': [y]}
+        if lpz is not None:
+            from espnet.nets.ctc_prefix_score import CTCPrefixScore
+
+            ctc_prefix_score = CTCPrefixScore(lpz.cpu().detach().numpy(), 0, self.eos)
+            hyp['ctc_state_prev'] = ctc_prefix_score.initial_state()
+            hyp['ctc_score_prev'] = 0.0
+            if ctc_weight != 1.0:
+                # pre-pruning based on attention scores
+                from espnet.nets.pytorch_backend.rnn.decoders import CTC_SCORING_RATIO
+                ctc_beam = min(lpz.shape[-1], int(beam * CTC_SCORING_RATIO))
+            else:
+                ctc_beam = lpz.shape[-1]
+        hyps = [hyp]
+        ended_hyps = []
+
+        traced_decoder = None
+        for i in range(maxlen):
+            logging.debug('position ' + str(i))
+
+            hyps_best_kept = []
+            for hyp in hyps:
+                vy[0] = hyp['yseq'][i]
+
+                # get nbest local scores and their ids
+                ys_mask = subsequent_mask(i + 1).unsqueeze(0).to(enc_output.device)
+                ys = torch.tensor(hyp['yseq']).unsqueeze(0).to(enc_output.device)
+                # FIXME: jit does not match non-jit result
+                if use_jit:
+                    if traced_decoder is None:
+                        traced_decoder = torch.jit.trace(self.decoder.forward_one_step,
+                                                         (ys, ys_mask, enc_output))
+                    local_att_scores = traced_decoder(ys, ys_mask, enc_output)[0]
+                else:
+                    local_att_scores = self.decoder.forward_one_step(ys, ys_mask, enc_output)[0]
+
+                local_att_scores = local_att_scores.cpu()
+
+                if rnnlm:
+                    rnnlm_state, local_lm_scores = rnnlm.predict(hyp['rnnlm_prev'], vy)
+                    local_scores = local_att_scores + recog_args.lm_weight * local_lm_scores
+                else:
+                    local_scores = local_att_scores
+
+                if lpz is not None:
+                    local_best_scores, local_best_ids = torch.topk(
+                        local_att_scores, ctc_beam, dim=1)
+                    ctc_scores, ctc_states = ctc_prefix_score(
+                        hyp['yseq'], local_best_ids[0], hyp['ctc_state_prev']
+                    )
+                    local_scores = \
+                        (1.0 - ctc_weight) * local_att_scores[:, local_best_ids[0]] \
+                        + ctc_weight * torch.from_numpy(ctc_scores - hyp['ctc_score_prev'])
+                    if rnnlm:
+                        local_scores += recog_args.lm_weight * local_lm_scores[:, local_best_ids[0]]
+                    local_best_scores, joint_best_ids = torch.topk(local_scores, beam, dim=1)
+                    local_best_ids = local_best_ids[:, joint_best_ids[0]]
+                else:
+                    local_best_scores, local_best_ids = torch.topk(local_scores, beam, dim=1)
+
+                for j in range(beam):
+                    new_hyp = {}
+                    new_hyp['score'] = hyp['score'] + float(local_best_scores[0, j])
+                    new_hyp['yseq'] = [0] * (1 + len(hyp['yseq']))
+                    new_hyp['yseq'][:len(hyp['yseq'])] = hyp['yseq']
+                    new_hyp['yseq'][len(hyp['yseq'])] = int(local_best_ids[0, j])
+                    if rnnlm:
+                        new_hyp['rnnlm_prev'] = rnnlm_state
+                    if lpz is not None:
+                        new_hyp['ctc_state_prev'] = ctc_states[joint_best_ids[0, j]]
+                        new_hyp['ctc_score_prev'] = ctc_scores[joint_best_ids[0, j]]
+                    # will be (2 x beam) hyps at most
+                    hyps_best_kept.append(new_hyp)
+
+                hyps_best_kept = sorted(
+                    hyps_best_kept, key=lambda x: x['score'], reverse=True)[:beam]
+
+            # sort and get nbest
+            hyps = hyps_best_kept
+            logging.debug('number of pruned hypothes: ' + str(len(hyps)))
+            if char_list is not None:
+                logging.debug(
+                    'best hypo: ' + ''.join([char_list[int(x)] for x in hyps[0]['yseq'][1:]]))
+
+            # add eos in the final loop to avoid that there are no ended hyps
+            if i == maxlen - 1:
+                logging.info('adding <eos> in the last postion in the loop')
+                for hyp in hyps:
+                    hyp['yseq'].append(self.eos)
+
+            # add ended hypothes to a final list, and removed them from current hypothes
+            # (this will be a probmlem, number of hyps < beam)
+            remained_hyps = []
+            for hyp in hyps:
+                if hyp['yseq'][-1] == self.eos:
+                    # only store the sequence that has more than minlen outputs
+                    # also add penalty
+                    if len(hyp['yseq']) > minlen:
+                        hyp['score'] += (i + 1) * penalty
+                        if rnnlm:  # Word LM needs to add final <eos> score
+                            hyp['score'] += recog_args.lm_weight * rnnlm.final(
+                                hyp['rnnlm_prev'])
+                        ended_hyps.append(hyp)
+                else:
+                    remained_hyps.append(hyp)
+
+            # end detection
+            from espnet.nets.e2e_asr_common import end_detect
+            if end_detect(ended_hyps, i) and recog_args.maxlenratio == 0.0:
+                logging.info('end detected at %d', i)
+                break
+
+            hyps = remained_hyps
+            if len(hyps) > 0:
+                logging.debug('remeined hypothes: ' + str(len(hyps)))
+            else:
+                logging.info('no hypothesis. Finish decoding.')
+                break
+
+            if char_list is not None:
+                for hyp in hyps:
+                    logging.debug(
+                        'hypo: ' + ''.join([char_list[int(x)] for x in hyp['yseq'][1:]]))
+
+            logging.debug('number of ended hypothes: ' + str(len(ended_hyps)))
+
+        nbest_hyps = sorted(
+            ended_hyps, key=lambda x: x['score'], reverse=True)[:min(len(ended_hyps), recog_args.nbest)]
+
+        # check number of hypotheis
+        if len(nbest_hyps) == 0:
+            logging.warning('there is no N-best results, perform recognition again with smaller minlenratio.')
+            # should copy becasuse Namespace will be overwritten globally
+            recog_args = Namespace(**vars(recog_args))
+            recog_args.minlenratio = max(0.0, recog_args.minlenratio - 0.1)
+            return self.recognize(x, recog_args, char_list, rnnlm)
+
+        logging.info('total log probability: ' + str(nbest_hyps[0]['score']))
+        logging.info('normalized log probability: ' + str(nbest_hyps[0]['score'] / len(nbest_hyps[0]['yseq'])))
+        return nbest_hyps
+
+    def recognize_maskctc(self, x, recog_args, char_list=None):
+        """Non-autoregressive decoding using Mask CTC.
+
+        :param ndnarray x: input acoustic feature (B, T, D) or (T, D)
+        :param Namespace recog_args: argment Namespace contraining options
+        :param list char_list: list of characters
+        :return: decoding result
+        :rtype: list
+        """
+        self.eval()
+        h = self.encode(x).unsqueeze(0)
+
+        ctc_probs, ctc_ids = torch.exp(self.ctc.log_softmax(h)).max(dim=-1)
+        y_hat = torch.stack([x[0] for x in groupby(ctc_ids[0])])
+        y_idx = torch.nonzero(y_hat != 0).squeeze(-1)
+
+        probs_hat = []
+        cnt = 0
+        for i, y in enumerate(y_hat.tolist()):
+            probs_hat.append(-1)
+            while cnt < ctc_ids.shape[1] and y == ctc_ids[0][cnt]:
+                if probs_hat[i] < ctc_probs[0][cnt]:
+                    probs_hat[i] = ctc_probs[0][cnt].item()
+                cnt += 1
+        probs_hat = torch.from_numpy(np.array(probs_hat))
+
+        char_mask = "_"
+        p_thres = recog_args.maskctc_probability_threshold
+        mask_idx = torch.nonzero(probs_hat[y_idx] < p_thres).squeeze(-1)
+        confident_idx = torch.nonzero(probs_hat[y_idx] >= p_thres).squeeze(-1)
+        mask_num = len(mask_idx)
+
+        y_in = torch.zeros(1, len(y_idx) + 1, dtype=torch.long) + self.mask_token
+        y_in[0][confident_idx] = y_hat[y_idx][confident_idx]
+        y_in[0][-1] = self.eos
+
+        logging.info(
+            "ctc:{}".format(
+                "".join(
+                    [
+                        char_list[y] if y != self.mask_token else char_mask
+                        for y in y_in[0].tolist()
+                    ]
+                ).replace("<space>", " ")
+            )
+        )
+
+        if not mask_num == 0:
+            K = recog_args.maskctc_n_iterations
+            num_iter = K if mask_num >= K and K > 0 else mask_num
+
+            for t in range(1, num_iter):
+                pred, _ = self.decoder(
+                    y_in, (y_in != self.ignore_id).unsqueeze(-2), h, None
+                )
+                pred_sc, pred_id = pred[0][mask_idx].max(dim=-1)
+                cand = torch.topk(pred_sc, mask_num // num_iter, -1)[1]
+                y_in[0][mask_idx[cand]] = pred_id[cand]
+                mask_idx = torch.nonzero(y_in[0] == self.mask_token).squeeze(-1)
+
+                logging.info(
+                    "msk:{}".format(
+                        "".join(
+                            [
+                                char_list[y] if y != self.mask_token else char_mask
+                                for y in y_in[0].tolist()
+                            ]
+                        ).replace("<space>", " ")
+                    )
+                )
+
+            pred, pred_mask = self.decoder(
+                y_in, (y_in != self.ignore_id).unsqueeze(-2), h, None
+            )
+            y_in[0][mask_idx] = pred[0][mask_idx].argmax(dim=-1)
+            logging.info(
+                "msk:{}".format(
+                    "".join(
+                        [
+                            char_list[y] if y != self.mask_token else char_mask
+                            for y in y_in[0].tolist()
+                        ]
+                    ).replace("<space>", " ")
+                )
+            )
+
+        ret = y_in.tolist()[0][:-1]
+        hyp = {"score": 0.0, "yseq": [self.sos] + ret + [self.eos]}
+
+        return [hyp]
+
+    def calculate_all_attentions(self, xs_pad, ilens, ys_pad):
+        """E2E attention calculation.
+
+        :param torch.Tensor xs_pad: batch of padded input sequences (B, Tmax, idim)
+        :param torch.Tensor ilens: batch of lengths of input sequences (B)
+        :param torch.Tensor ys_pad: batch of padded token id sequence tensor (B, Lmax)
+        :return: attention weights with the following shape,
+            1) multi-head case => attention weights (B, H, Lmax, Tmax),
+            2) other case => attention weights (B, Lmax, Tmax).
+        :rtype: float ndarray
+        """
+        with torch.no_grad():
+            self.forward(xs_pad, ilens, ys_pad)
+        ret = dict()
+        for name, m in self.named_modules():
+            if isinstance(m, MultiHeadedAttention):
+                ret[name] = m.attn.cpu().numpy()
+        return ret
