@@ -36,6 +36,7 @@ setup_target(){
 
 setup_target
 test_features=dump/${test_set}/deltafalse
+recog_set="a b f g h i j k l m n o"
 
 pids=() # initialize pids
 for rtask in ${recog_set}; do
@@ -52,14 +53,14 @@ for rtask in ${recog_set}; do
       --verbose ${verbose} \
       --recog-json ${test_features}/${json_prefix}.${rtask}.json \
       --result-label ${outdir}/results.json \
-      --model ${recog_model} \
-      > $outdir/test.log 2> $outdir/test.err
+      --model ${recog_model} #\
+      #> $outdir/test.log 2> $outdir/test.err
 
     #score_sclite.sh ${decode_dir} ${dict}
 
-  ) &
+  ) #&
 
-  pids+=($!) # store background pids
+  #pids+=($!) # store background pids
 done
 
 i=0; for pid in "${pids[@]}"; do wait ${pid} || ((++i)); done

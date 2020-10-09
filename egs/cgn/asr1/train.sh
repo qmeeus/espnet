@@ -26,6 +26,11 @@ setup_target(){
         && model_class=espnet.nets.pytorch_backend.e2e_asr_transformer:E2E \
         || model_class=espnet.nets.pytorch_backend.e2e_asr:E2E
       ;;
+    "wordpiece_mlm")
+      dict=data/lang_unigram/${train_set}_unigram_${vocab_size}_units.txt
+      json_prefix="data_unigram_${vocab_size}"
+      model_class=espnet.nets.pytorch_backend.e2e_student:E2E
+      ;;
     "word")
       dict=${dict:-data/lang_word/${train_set}_word_units.txt}
       json_prefix="${json_prefix:-data_words}"
@@ -53,7 +58,7 @@ setup_target(){
 }
 
 setup_target
-verbose=${verbose:-0}
+verbose=${verbose:-20}
 train_features=dump/${train_set}/deltafalse
 dev_features=dump/${dev_set}/deltafalse
 validset_tag=${validset_tag:-$dataset_tag}
@@ -85,8 +90,8 @@ mkdir -p $output_dir
     --minibatches ${N} \
     --verbose $verbose \
     --resume ${resume} \
-    $OPTIONS \
-     | tee $output_dir/train.log
+    $OPTIONS #\
+    # | tee $output_dir/train.log
 
-)  3>&1 1>&2 2>&3 | tee $output_dir/train.err
+)  #3>&1 1>&2 2>&3 | tee $output_dir/train.err
 
