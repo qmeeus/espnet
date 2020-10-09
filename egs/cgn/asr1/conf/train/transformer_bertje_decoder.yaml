@@ -1,11 +1,11 @@
 # network architecture
 # encoder related
 elayers: 6
-eunits: 1024
+eunits: 2048
 # decoder related
 teacher-model: wietsedv/bert-base-dutch-cased
 # attention related
-adim: 128 
+adim: 512 
 aheads: 8
 
 # hybrid CTC/attention

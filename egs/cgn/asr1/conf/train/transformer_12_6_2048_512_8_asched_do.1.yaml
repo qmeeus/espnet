@@ -32,6 +32,7 @@ patience: 5
 epochs: 100
 dropout-rate: 0.1
 sampling-probability: 0.0
+decoder-mode: maskctc
 
 # transformer specific setting
 backend: pytorch
