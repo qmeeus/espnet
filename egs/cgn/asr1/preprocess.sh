@@ -38,7 +38,9 @@ if [ ${stage} -le 1  ]; then
   echo "stage 1: Feature Generation"
   fbankdir=fbank
   # Generate the fbank features; by default 80-dimensional fbanks with pitch on each frame
-  steps/make_fbank_pitch.sh --cmd "$train_cmd" --nj 8 --write_utt2num_frames true \
+  #steps/make_fbank_pitch.sh --cmd "$train_cmd" --nj 8 --write_utt2num_frames true \
+  #  ${data_dir} exp/make_fbank/CGN_ALL ${fbankdir}
+  steps/make_fbank.sh --cmd "$train_cmd" --nj 8 --write_utt2num_frames true \
     ${data_dir} exp/make_fbank/CGN_ALL ${fbankdir}
 fi
 
@@ -56,7 +58,8 @@ if [ ${stage} -le 2  ]; then
   compute-cmvn-stats scp:data/CGN_train/feats.scp data/CGN_train/cmvn.ark
 
   for subset in train valid test; do
-    feature_dir=${dumpdir}/CGN_${subset}/delta${do_delta}
+    #feature_dir=${dumpdir}/CGN_${subset}/delta${do_delta}
+    feature_dir=${dumpdir}/CGN_${subset}/nopitch
     mkdir -p $feature_dir
     dump.sh --cmd "$train_cmd" --nj 8 --do_delta ${do_delta} \
         data/CGN_${subset}/feats.scp data/CGN_train/cmvn.ark exp/dump_feats/${subset} ${feature_dir}
