@@ -131,7 +131,7 @@ def get_parser():
     parser.add_argument(
         "--maskctc-probability-threshold",
         type=float,
-        default=0.999,
+        default=0.99,
         help="Threshold probability for CTC output",
     )
     return parser

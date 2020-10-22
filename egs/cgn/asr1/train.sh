@@ -48,7 +48,8 @@ setup_target(){
       # json_prefix="data_vectors_bert_dutch"
       json_prefix="data_unigram_${vocab_size}"
       SCRIPT=w2v_train.py
-      model_class=espnet.nets.pytorch_backend.e2e_xlmr_transformer:E2E
+      #model_class=espnet.nets.pytorch_backend.e2e_xlmr_transformer:E2E
+      model_class=espnet.nets.pytorch_backend.e2e_mlm_transformer:E2E
       ;;
     *)
       echo "Invalid target: $target" && exit 1

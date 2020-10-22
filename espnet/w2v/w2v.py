@@ -10,7 +10,7 @@ from sklearn.neighbors import KNeighborsClassifier
 from espnet.data.dataset import ASRDataset
 from espnet.utils.deterministic_utils import set_deterministic_pytorch
 from espnet.utils.training.batchfy import make_batchset
-from espnet.asr.pytorch_backend.asr_init import load_trained_modules
+from espnet.asr.pytorch_backend.asr_init import load_trained_modules, load_trained_model
 from espnet.utils.dynamic_import import dynamic_import
 from espnet.asr.pytorch_backend.converter import CustomConverter
 from espnet.asr.pytorch_backend.trainer import CustomTrainer

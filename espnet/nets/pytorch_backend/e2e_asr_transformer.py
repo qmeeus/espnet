@@ -171,19 +171,19 @@ class E2E(ASRInterface, torch.nn.Module):
         :param Namespace args: argument Namespace containing options
         """
         torch.nn.Module.__init__(self)
-        self.sampling_probability = args.sampling_probability
+        self.sampling_probability = getattr(args, "sampling_probability", 0.)
 
         self.encoder = self.build_encoder(idim, args)
         self.decoder = self.build_decoder(odim, args)
 
         self.char_list = args.char_list
 
-        self.decoder_mode = args.decoder_mode
+        self.decoder_mode = getattr(args, "decoder_mode", "ar")
         # HACK: error prone: char_list can only be None when working with vectors
         if self.char_list:
             self.sos = self.eos = self.char_list.index("</s>")
             self.pad = self.char_list.index("<pad>") if "<pad>" in self.char_list else None
-            self.blank = self.char_list.index(args.sym_blank)
+            self.blank = self.char_list.index(getattr(args, "sym_blank", "<blank>"))
             self.mask_token = self.char_list.index("<mask>") if "<mask>" in self.char_list else None
 
         self.odim = odim
@@ -254,7 +254,7 @@ class E2E(ASRInterface, torch.nn.Module):
         from espnet.nets.e2e_asr_common import ErrorCalculator
         return ErrorCalculator(
             args.char_list,
-            args.sym_space,
+            getattr(args, "sym_space", "<space>"),
             args.sym_blank,
             args.report_cer, args.report_wer
         )
@@ -281,7 +281,7 @@ class E2E(ASRInterface, torch.nn.Module):
         hs_pad, hs_mask = self.encoder(xs_pad, src_mask)
 
         # 2. forward decoder
-        if self.decoder_mode == "mask_ctc":
+        if self.decoder_mode == "maskctc":
             ys_in_pad, ys_out_pad = mask_uniform(
                 ys_pad, self.mask_token, self.eos, self.ignore_id
             )
@@ -361,7 +361,9 @@ class E2E(ASRInterface, torch.nn.Module):
         :rtype: torch.Tensor
         """
         self.eval()
-        x = torch.as_tensor(x).unsqueeze(0)
+        x = torch.as_tensor(x)
+        if x.ndim == 2:
+            x = x.unsqueeze(0)
         enc_output, _ = self.encoder(x, None)
         return enc_output.squeeze(0)
 

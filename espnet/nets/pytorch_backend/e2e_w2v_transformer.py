@@ -166,7 +166,7 @@ class E2E(BaseE2E):
             loss = loss_fn(pred_pad, ys_out_emb, (ys_pad != self.ignore_id).sum(-1) + 1)
             pred_pad = pred_pad.detach().cpu().numpy()
             output["loss"] = loss.detach().cpu().numpy()
-            
+
             # Decoding with 1NN
             token2str = self.tokens_to_string
             target_sentences = list(map(token2str, [y[y != self.ignore_id] for y in ys_pad]))
@@ -181,7 +181,7 @@ class E2E(BaseE2E):
                 words_true, words_pred = (sent.split() for sent in (target_sentence, predicted_sentence))
 
                 output["accuracy"].append(
-                    np.mean([word_true == word_pred 
+                    np.mean([word_true == word_pred
                     for word_true, word_pred in zip(words_true, words_pred)])
                 )
 

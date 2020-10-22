@@ -131,7 +131,7 @@ CONFIG = {
 
     # Pretrained models
     "enc-init": dict(default=None, type=str, help='Pre-trained ASR model to initialize encoder.'),
-    "enc-init-mods": dict(default='encoder.', type=split_string(','), help='List of encoder modules to initialize, separated by a comma.'),
+    "enc-init-mods": dict(default='encoder.,ctc.', type=split_string(','), help='List of encoder modules to initialize, separated by a comma.'),
     "dec-init": dict(default=None, type=str, help='Pre-trained ASR, MT or LM model to initialize decoder.'),
     "dec-init-mods": dict(default='decoder.', type=split_string(','), help='List of decoder modules to initialize, separated by a comma.'),
 

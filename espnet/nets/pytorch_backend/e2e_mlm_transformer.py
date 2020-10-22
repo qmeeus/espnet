@@ -4,10 +4,16 @@ import logging
 import math
 import fairseq
 import torch
+from torch import nn
+from torch.nn import functional as F
 from random import random
+from itertools import groupby
+from operator import itemgetter
+
+from transformers import DataCollatorForLanguageModeling
+from transformers import AutoModel, AutoTokenizer
 
 from espnet.nets.pytorch_backend.nets_utils import make_non_pad_mask
-from espnet.nets.pytorch_backend.losses import MaskedMSELoss
 from espnet.nets.pytorch_backend.transformer.add_sos_eos import add_sos_eos, mask_uniform
 from espnet.nets.pytorch_backend.transformer.attention import MultiHeadedAttention
 from espnet.nets.pytorch_backend.transformer.decoder_w2v import Decoder
@@ -17,6 +23,24 @@ from espnet.nets.pytorch_backend.e2e_w2v_transformer import E2E as BaseE2E
 from espnet.nets.pytorch_backend.e2e_asr_transformer import E2E as ASRE2E
 from espnet.nets.e2e_asr_common import tokens2text
 from espnet.nets.pytorch_backend.nets_utils import pad_list
+
+
+class MaskedMSELoss(nn.Module):
+    
+    def __init__(self, reduction='sum'):
+        super(MaskedMSELoss, self).__init__()
+        self.reduction = reduction
+
+    def forward(self, pred, target, target_mask):
+        mse = F.mse_loss(pred, target, reduction='none').mean(-1)
+        mse.masked_fill_(target_mask, 0)
+        sequence_loss = mse.sum(-1)
+        if self.reduction == 'sum':
+            return sequence_loss.sum()
+        elif self.reduction == 'mean':
+            return (sequence_loss / target_lengths).mean()
+        else:
+            return sequence_loss
 
 
 def target_mask(ys_pad, ignore_id=0, mask_eos=True):
@@ -46,6 +70,7 @@ class E2E(BaseE2E):
         group = parser._action_groups[-1]
         group.add_argument("--teacher-model", type=str, default="distilbert-base-multilingual-cased")
         group.add_argument("--emb-dim", type=int, default=768)
+        group.add_argument("--mlm-probability", type=float, default=.8)
         return parser
 
     def __init__(self, idim, odim, args, ignore_id=-1):
@@ -59,10 +84,14 @@ class E2E(BaseE2E):
         super(E2E, self).__init__(idim, odim, args, ignore_id=-1)
         self.teacher_model, self.teacher_tokenizer = self.load_teacher(args.teacher_model)
         self.mask_token = self.teacher_tokenizer.mask_token_id
+        self.ignore_id = -100  # hardcoded in transformers
+        self.data_collator = DataCollatorForLanguageModeling(
+            tokenizer=self.teacher_tokenizer, mlm=True, mlm_probability=args.mlm_probability
+        )
+        assert self.decoder_mode == "maskctc", "`self.decoder_mode` can only be maskctc for this class"
 
     @staticmethod
     def load_teacher(teacher_model_identifier):
-        from transformers import AutoModel, AutoTokenizer
         tokenizer = AutoTokenizer.from_pretrained(teacher_model_identifier)
         teacher = AutoModel.from_pretrained(teacher_model_identifier)
         teacher.eval()
@@ -109,6 +138,9 @@ class E2E(BaseE2E):
             src_attention_dropout_rate=args.transformer_attn_dropout_rate,
             input_layer="linear"
         )
+
+    def build_criterion(self, args):
+        return MaskedMSELoss()
 
     def forward(self, xs_pad, ilens, ys_pad, calc_metrics=False, compat_on=True, ctc_forcing=True):
         """E2E forward.
@@ -173,38 +205,22 @@ class E2E(BaseE2E):
 
 
         # 2b. forward decoder
-        if self.decoder_mode == "maskctc":
-            ys_pad = tokens = pad_list(
-                list(map(torch.tensor, map(self.teacher_tokenizer.encode, texts))), 
-                self.ignore_id
-            ).to(ys_pad.device)
+        batch = self.data_collator(
+            list(map(self.teacher_tokenizer.encode, texts))
+        )
 
-            ys_in_pad, ys_out_pad = mask_uniform(
-                ys_pad, self.mask_token, self.teacher_tokenizer.pad_token_id, self.ignore_id
-            )
-            ys_out_mask = ys_out_pad == self.ignore_id
-            ys_out_pad.masked_fill_(ys_out_mask, self.teacher_tokenizer.pad_token_id)
-            # ys_out_pad = torch.where(ys_out_pad != self.ignore_id, ys_out_pad, ys_in_pad)
-            ys_mask = (ys_in_pad != self.teacher_tokenizer.pad_token_id)
-            import ipdb; ipdb.set_trace()
-            ys_in_pad = self.teacher_model(ys_in_pad, attention_mask=ys_mask)[0].to(ys_pad.device)
-            ys_out_pad = self.teacher_model(ys_out_pad, attention_mask=ys_mask)[0].to(ys_pad.device)
-            ys_mask = ys_mask.unsqueeze(1)
-        else:
-            ys_pad = self.teacher_encode(texts).to(ys_pad.device)
-            ys_in_pad, ys_out_pad = add_sos_eos(
-                ys_pad, self.sos, self.eos, self.ignore_id
-            )
+        ys_in_pad, ys_out_pad = batch["input_ids"].to(hs_pad.device), batch["labels"].to(hs_pad.device)
+        ys_mask = (ys_in_pad != self.teacher_tokenizer.pad_token_id)
+        ys_out_mask = (ys_out_pad != self.ignore_id)
+        ys_out_pad.masked_fill_(ys_out_pad == self.ignore_id, self.teacher_tokenizer.pad_token_id)
+        ys_in_pad = self.teacher_model(ys_in_pad, attention_mask=ys_mask)[0].to(ys_pad.device)
+        ys_out_pad = self.teacher_model(ys_out_pad, attention_mask=ys_mask)[0].to(ys_pad.device)
+        ys_mask = ys_mask.unsqueeze(1)
 
-            ys_mask = target_mask(ys_in_pad, self.ignore_id)
-            ys_out_mask = ys_out_pad != self.ignore_id
-
-        #ys_in_pad, ys_out_pad = ys_pad[:, :-1].clone(), ys_pad[:, 1:].clone()
-        #ys_mask = target_mask(ys_in_pad)
         pred_pad, pred_mask = self.decoder(ys_in_pad, ys_mask, hs_pad, hs_mask)
 
         # 3. compute attention loss
-        loss_att = self.criterion(pred_pad, ys_out_pad, ys_out_mask.sum(-1))
+        loss_att = self.criterion(pred_pad, ys_out_pad, ys_out_mask)
         losses["loss_att"] = loss_att
 
         if hasattr(self, 'ctc'):
@@ -292,6 +308,55 @@ class E2E(BaseE2E):
                     ys = torch.cat([ys, y.unsqueeze(1)], dim=1)
 
                 return ys, torch.tensor([False]).repeat(*ys.size())
+
+
+    def recognize_maskctc(self, x, char_list=None, p_thres=.99):
+        """Non-autoregressive decoding using Mask CTC.
+
+        :param ndnarray x: input acoustic feature (B, T, D) or (T, D)
+        :param Namespace recog_args: argment Namespace contraining options
+        :param list char_list: list of characters
+        :return: decoding result
+        :rtype: list
+        """
+
+        self.eval()
+        h = self.encode(x).unsqueeze(0)
+        ctc_probs, ctc_ids = torch.exp(self.ctc.log_softmax(h)).max(dim=-1)
+
+        y_hat, probs_hat = map(torch.tensor, zip(
+            *map(lambda group: (group[0], max(map(itemgetter(1), group[1]))), groupby(
+                zip(ctc_ids.squeeze(0), ctc_probs.squeeze(0)), key=lambda x: x[0]
+            ))
+        ))
+
+        y_idx = torch.nonzero(y_hat != 0).squeeze(-1)
+
+        char_mask = "_"
+        mask_idx = torch.nonzero(probs_hat[y_idx] < p_thres).squeeze(-1)
+        confident_idx = torch.nonzero(probs_hat[y_idx] >= p_thres).squeeze(-1)
+        mask_num = len(mask_idx)
+
+        tokens = y_hat[y_idx]
+        tokens[mask_idx] = self.char_list.index("<mask>")
+        sentence = "".join(map(self.char_list.__getitem__, tokens)).replace("▁", " ").replace("<mask>", "[MASK]")
+        tokens_in = self.teacher_tokenizer.encode(sentence, return_tensors="pt").to(h.device)
+        y_in_mask = (tokens_in != self.teacher_tokenizer.pad_token_id)
+        y_in = self.teacher_model(tokens_in, attention_mask=y_in_mask)[0].to(h.device)
+
+        if len(y_idx):
+            logging.info(f"Masked inputs: {len(mask_idx)} ({len(mask_idx) / len(y_idx):.3%})")
+        else:
+            logging.info("Empty prediction")
+        logging.info(f"ctc: {sentence}")
+
+        pred, pred_mask = self.decoder(
+            y_in, y_in_mask.unsqueeze(0), h, None
+        )
+
+        return pred, pred_mask
+
+
 
 
     def tokens_to_string(self, tokens):
