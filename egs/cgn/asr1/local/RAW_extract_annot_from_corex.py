@@ -9,6 +9,9 @@ import string
 import multiprocessing as mp
 from time import time
 from logger import setup
+from operator import itemgetter
+from copy import deepcopy
+
 
 OUTPUT_DIR = Path("./data/CGN_ALL").absolute()
 ANNOT_DIR = Path("~/data/cgn/CDdata/CGN_V1.0_elda_ann/data/annot/corex/sea").expanduser()
@@ -25,6 +28,7 @@ logger = setup(LOG_DIR, LOGLEVEL)
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--use-existing-annotations", action="store_true", default=False)
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
     parser.add_argument("--annot-dir", type=Path, default=ANNOT_DIR)
     parser.add_argument("--annot-file", type=Path, default=ANNOT_FILE)
@@ -75,7 +79,7 @@ def load_annot(annot_file):
 
 def extract_utterances(options):
     logger.info("Gathering annotation files"); t0 = time()
-    os.system(f'find {options.annot_dir} -type f -name "fv*" > /tmp/seafiles.cgn')
+    os.system(f'find {options.annot_dir} -type f -name "f*" > /tmp/seafiles.cgn')
     annot_files = pd.read_csv("/tmp/seafiles.cgn", names=["path"], squeeze=True)
     logger.info(f"{len(annot_files):,} found (took {time()-t0:.2f} s). Starting extraction"); t1 = time()
     with mp.Pool(options.njobs) as pool:
@@ -87,20 +91,45 @@ def extract_utterances(options):
     utterances.index = utterances.index.rename("uttid")
     t2 = time()
     logger.info(f"Extracted {len(utterances):,} annotations in {t2-t1:.2f} s (total={t2-t0:.2f} s).")
+    os.makedirs(options.annot_file.parent, exist_ok=True)
     utterances.to_csv(options.annot_file)
     if LOGLEVEL == "DEBUG": utterances.to_csv(LOG_DIR/"annots0.csv")
     return utterances
 
 
+def find_overlapping_utterances(group):
+    """
+    Input: tuple (index, group) such as given by pd.DataFrame.groupby
+    Returns: a set of ids that overlap
+    """
+    if isinstance(group, tuple):
+        _, group = group
+
+    connected = (
+        group.merge(group, on="name")
+        .where(_is_different)
+        .dropna(how="all")
+    )
+
+    connected["overlap"] = connected.apply(_is_overlapping, axis=1)
+    return set(connected.loc[connected["overlap"], "uttid_x"])
+
+def _is_different(row):
+    return row["uttid_x"] != row["uttid_y"]
+
+def _is_overlapping(row):
+    return row["interval_x"].overlaps(row["interval_y"])
+
+
 def filter_utterances(utterances, options):
-    logger.info(f"Removing BACKGROUND and COMMENT. {len(utterances)} utterances"); t0 = time()
+    logger.info(f"Removing BACKGROUND and COMMENT. {len(utterances):,} utterances"); t0 = time()
     # Remove BACKGROUND and COMMENT from the utterances
     utterances = utterances[~utterances["speaker"].isin(["BACKGROUND", "COMMENT"])].copy()
     logger.info(f"Done in {time() - t0:.2f} s.")
     if LOGLEVEL == "DEBUG": utterances.to_csv(LOG_DIR/"annots1.csv")
 
     # Extract the filename
-    utterances["name"] = utterances.index.str.extract(r"-(fv\d+)\.").values
+    utterances["name"] = utterances.index.str.extract(r"-(f.\d+)\.").values
 
     # Reorder the columns to have annotations at the end
     column_order = [3, 4, 2, 17, 0, 1, *range(5, 17)]
@@ -150,7 +179,7 @@ def filter_utterances(utterances, options):
         return df.apply(_to_interval, axis=1)
 
     if options.drop_overlapping:
-        logger.info(f"Removing overlapping utterances. {len(utterances)} utterances"); t1 = time()
+        logger.info(f"Removing overlapping utterances. {len(utterances):,} utterances"); t1 = time()
 
         multispeakers = (
             utterances[utterances["comp"].isin(MULTISPEAKERS_COMPONENTS)]
@@ -162,32 +191,31 @@ def filter_utterances(utterances, options):
             .copy()
         )
 
-        connected = (
-            multispeakers.merge(multispeakers, on="name")
-            .where(lambda row: row["uttid_x"] != row["uttid_y"])
-            .dropna(how="all")
-        )
+        import ipdb; ipdb.set_trace()
+        # overlapping_ids = [
+        #     find_overlapping_utterances(group)
+        #     for group in multispeakers.groupby("name")
+        # ]
 
         with mp.Pool(options.njobs) as pool:
-            connected["overlap"] = pd.concat(
-                pool.imap(is_overlapping, np.array_split(connected, options.njobs)),
-                axis=0
+            overlapping_ids = pool.map(
+                find_overlapping_utterances, multispeakers.groupby("name")
             )
 
-        overlapping_ids = set(connected.loc[connected["overlap"], "uttid_x"])
+        overlapping_ids = set().union(*overlapping_ids)
         utterances = utterances.loc[~utterances.index.isin(overlapping_ids)].copy()
         logger.info(f"Done in {time() - t1:.2f} s.")
         if LOGLEVEL == "DEBUG": utterances.to_csv(LOG_DIR/"annots3.csv")
 
     # Filter out utterances that contain unknown expressions (xxx)
     if options.drop_unknown:
-        logger.info(f"Removing utterances with unknown words. {len(utterances)} utterances"); t2 = time()
+        logger.info(f"Removing utterances with unknown words. {len(utterances):,} utterances"); t2 = time()
         utterances = utterances.loc[~utterances.text.str.contains("xxx")]
         logger.info(f"Done in {time() - t2:.2f} s.")
         if LOGLEVEL == "DEBUG": utterances.to_csv(LOG_DIR/"annots4.csv")
 
     # Filter out utterances based on duration (seconds) and length (number of words)
-    logger.info(f"Removing short utterances. {len(utterances)} utterances"); t3 = time()
+    logger.info(f"Removing short utterances. {len(utterances):,} utterances"); t3 = time()
     duration_mask = utterances.duration >= options.min_duration_seconds
     length_mask = utterances.length >= options.min_length_words
     utterances = utterances[duration_mask & length_mask].copy()
@@ -225,13 +253,13 @@ def filter_utterances(utterances, options):
         r"^(ja\s?)+(uh\s?)+$"
     ]
 
-    logger.info(f"Removing utterances based on patterns. {len(utterances)} utterances"); t4 = time()
+    logger.info(f"Removing utterances based on patterns. {len(utterances):,} utterances"); t4 = time()
     for pattern in exclude_patterns:
         utterances = utterances.loc[~utterances["text"].str.match(pattern)]
     logger.info(f"Done in {time() - t4:.2f} s.")
     if LOGLEVEL == "DEBUG": utterances.to_csv(LOG_DIR/"annots6.csv")
 
-    logger.info(f"Remaining utterances: {len(utterances)} utterances")
+    logger.info(f"Remaining utterances: {len(utterances):,} utterances")
     # Sort by uttid
     utterances = utterances.sort_values("uttid").copy()
 
@@ -242,16 +270,12 @@ def filter_utterances(utterances, options):
     return utterances
 
 
-def is_overlapping(df):
-
-    def _is_overlapping(row):
-        return row["interval_x"].overlaps(row["interval_y"])
-
-    return df.apply(_is_overlapping, axis=1)
-
-
 if __name__ == "__main__":
     options = parse_args()
-    utterances = extract_utterances(options)
+    utterances = (
+        pd.read_csv(ANNOT_FILE, index_col=0)
+        if options.use_existing_annotations
+        else extract_utterances(options)
+    )
     filter_utterances(utterances, options)
 

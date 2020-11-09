@@ -19,7 +19,7 @@ ORT, TAG = (Path(ANNOT_XML, d) for d in ("skp-ort", "tag"))
 OUTPUT_DIR = Path("/users/spraak/qmeeus/spchdisk/repos/espnet/egs/cgn/asr1/data/CGN_ALL")
 ANNOT_FILE = Path(OUTPUT_DIR, "annotations.csv")
 
-FILTER_LANG = ["vl"]
+FILTER_LANG = ["vl", "nl"]
 FILTER_COMP = []
 MIN_LENGTH_SEC = 2
 MIN_WORDS = 2
@@ -204,7 +204,7 @@ def parse_args():
     parser.add_argument("--annot-file", default=ANNOT_FILE, type=Path)
     parser.add_argument("--file-list", default=CSV_DUMP, type=Path)
     parser.add_argument("--output-dir", default=OUTPUT_DIR, type=Path)
-    parser.add_argument("--components", nargs="*", default=list("abfghijklmno"), type=list)
+    parser.add_argument("--components", nargs="*", default=list("abefghijklmno"), type=list)
     parser.add_argument("--lang", nargs="*", default=["vl"], type=list)
     parser.add_argument("--use-existing-annot", action="store_true")
     parser.add_argument("--use-existing-file-registry", action="store_true")

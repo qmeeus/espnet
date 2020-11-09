@@ -5,6 +5,15 @@ import pandas as pd
 import argparse
 from pathlib import Path
 
+
+# TODO: Change to: one dataset per component and concatenate datasets when loading
+# TODO: This allows to have more flexible options (eg use gradually more components, apply CMVN per component, etc.)
+# TODO: Move to torch.utils.data will simplify this (it implements ConcatDataset) --> see my developments in transformers
+# TODO: Target directory structure:
+# TODO: cgn/comp-{a-o}/{train,valid,test}/{feats.ark,feats.scp,text}
+# TODO: tokenization is made at loading using huggingface tokenizers (instead of char_list)
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("json_prefix", type=str, help="prefix of global json file")
@@ -21,7 +30,8 @@ def main():
     options = parse_args()
     splits = pd.read_csv(options.splits, index_col="uttid")
     for subset in options.subsets:
-        subset_dir = Path(f"dump/CGN_{subset}/deltafalse")
+        # subset_dir = Path(f"dump/CGN_{subset}/deltafalse")
+        subset_dir = Path(f"dump/CGN_{subset}/nopitch")
         global_json = subset_dir / f"{options.json_prefix}.json"
         with open(global_json, encoding='utf-8') as f:
             dataset = json.load(f)["utts"]

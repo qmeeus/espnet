@@ -17,7 +17,7 @@ data_dir=data/CGN_ALL
 # =======================================================================================
 if [ $stage -le 0  ]; then
   echo "stage 0: prepare the data"
-  python local/RAW_extract_annot_from_corex.py --drop-unknown --drop-overlapping
+  python local/prep_utterances.py
   python local/RAW_prepare_cgn_annot.py \
     --annot-file ${data_dir}/annotations.csv \
     --file-list data/datafiles.csv \
@@ -54,7 +54,8 @@ fi
 # =======================================================================================
 if [ ${stage} -le 2  ]; then
   echo "stage 2: Dataset splits"
-  python local/RAW_split_subsets.py ${data_dir} --annot-file annotations.csv --prefix CGN
+  # The following line has to be done in a normal env bc path.sh messes up locales
+  # python local/RAW_split_subsets.py ${data_dir} --annot-file annotations.csv --prefix CGN
   compute-cmvn-stats scp:data/CGN_train/feats.scp data/CGN_train/cmvn.ark
 
   for subset in train valid test; do
@@ -102,7 +103,8 @@ if [ $stage -le 3 ]; then
     | tr ' ' '\n' | sort | uniq | awk '{print $0 " " NR+1}' >> $vocab
 
   for subset in train valid test; do
-    feature_dir=dump/CGN_${subset}/delta${do_delta}
+    # feature_dir=dump/CGN_${subset}/delta${do_delta}
+    feature_dir=dump/CGN_${subset}/nopitch
     data2json.sh \
       --feat ${feature_dir}/feats.scp \
       --bpecode ${model_prefix}.model \
@@ -112,8 +114,8 @@ if [ $stage -le 3 ]; then
 
   python local/RAW_split_datasets_components.py data_${model}_${vocab_size}
   python local/RAW_split_datasets_components.py data_${model}_${vocab_size} \
-    --groups a b f g h i j k l m n o \
-    --group-names a b f g h i j k l m n o \
+    --groups a b e f g h i j k l m n o \
+    --group-names a b e f g h i j k l m n o \
     --subsets test
 
 fi

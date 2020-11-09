@@ -60,8 +60,10 @@ setup_target(){
 
 setup_target
 verbose=${verbose:-20}
-train_features=dump/${train_set}/deltafalse
-dev_features=dump/${dev_set}/deltafalse
+# train_features=dump/${train_set}/deltafalse
+train_features=dump/${train_set}/nopitch
+# dev_features=dump/${dev_set}/deltafalse
+dev_features=dump/${dev_set}/nopitch
 validset_tag=${validset_tag:-$dataset_tag}
 train_json=${train_features}/${json_prefix}.${dataset_tag}.json
 valid_json=${dev_features}/${json_prefix}.${validset_tag}.json
