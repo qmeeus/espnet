@@ -17,7 +17,7 @@ def load_dictionary(args):
         return
 
     with open(args.dict, 'r', encoding='utf-8') as f:
-        char_list = list(map(str.strip, f.readlines()))
+        char_list = list(map(lambda s: s.split()[0], map(str.strip, f.readlines())))
 
     blank, eos = args.sym_blank, '</s>'
     if blank not in char_list:
