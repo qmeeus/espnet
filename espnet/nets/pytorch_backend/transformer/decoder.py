@@ -97,6 +97,7 @@ class Decoder(BatchScorerInterface, torch.nn.Module):
         pos_enc_class=PositionalEncoding,
         normalize_before=True,
         concat_after=False,
+        teacher_adim=None
     ):
         """Construct an Decoder object."""
         torch.nn.Module.__init__(self)
@@ -243,12 +244,21 @@ class Decoder(BatchScorerInterface, torch.nn.Module):
         self.selfattention_layer_type = selfattention_layer_type
         if self.normalize_before:
             self.after_norm = LayerNorm(attention_dim)
+
+        self.teacher_proj = (
+            torch.nn.Linear(attention_dim, teacher_adim)
+            if teacher_adim is not None and teacher_adim != attention_dim else None
+        )
+
         if use_output_layer:
-            self.output_layer = torch.nn.Linear(attention_dim, odim)
+            self.output_layer = torch.nn.Linear(
+                attention_dim if teacher_adim is None else teacher_adim, 
+                odim
+            )
         else:
             self.output_layer = None
 
-    def forward(self, tgt, tgt_mask, memory, memory_mask):
+    def forward(self, tgt, tgt_mask, memory, memory_mask, return_hidden=False):
         """Forward decoder.
 
         Args:
@@ -276,8 +286,14 @@ class Decoder(BatchScorerInterface, torch.nn.Module):
         )
         if self.normalize_before:
             x = self.after_norm(x)
+        if self.teacher_proj is not None:
+            x = self.teacher_proj(x)
+        if return_hidden is True:
+            hidden = x
         if self.output_layer is not None:
             x = self.output_layer(x)
+        if return_hidden is True:
+            return x, tgt_mask, hidden
         return x, tgt_mask
 
     def forward_one_step(self, tgt, tgt_mask, memory, cache=None):
