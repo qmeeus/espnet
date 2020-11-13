@@ -1,0 +1,19 @@
+Universe            = vanilla
+
+NiceUser            = true
+RequestCpus         = 1
+RequestMemory       = 32G
++RequestWallTime    = 86400
+Request_GPUs        = 1
+Requirements        = ( machine == "estragon.esat.kuleuven.be" ) || ( machine == "vladimir.esat.kuleuven.be" )
+
+Initialdir          = /esat/spchdisk/scratch/qmeeus/repos/espnet-stable/egs/cgn/asr1 
+Executable          = run.sh 
+Arguments           = --stage 4 --stop_stage 4 --ngpu 1 --train_config $(train_config)
+
+Notification        = Complete
+Log                 = exp/condor.log
+Output              = exp/condor.out 
+Error               = exp/condor.err
+
+Queue 1 
