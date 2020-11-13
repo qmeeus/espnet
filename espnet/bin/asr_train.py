@@ -547,18 +547,15 @@ def main(cmd_args):
     if "pytorch_backend" in args.model_module:
         args.backend = "pytorch"
 
-    # logging info
-    if args.verbose > 0:
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s",
-        )
-    else:
-        logging.basicConfig(
-            level=logging.WARN,
-            format="%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s",
-        )
-        logging.warning("Skip DEBUG/INFO messages")
+    logging.basicConfig(
+        level=(
+            logging.DEBUG if args.verbose > 1 else (
+                logging.INFO if args.verbose == 1 else logging.WARN
+            )
+        ), format="%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s",
+    )
+
+    logging.warning(f"Log level: {logging.root.level}")
 
     # If --ngpu is not given,
     #   1. if CUDA_VISIBLE_DEVICES is set, all visible devices
@@ -585,6 +582,7 @@ def main(cmd_args):
                 + " (see https://github.com/pytorch/pytorch/issues/21108)"
             )
         ngpu = args.ngpu
+    args.ngpu = ngpu
     logging.info(f"ngpu: {ngpu}")
 
     # display PYTHONPATH

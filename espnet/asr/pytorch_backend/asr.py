@@ -490,6 +490,7 @@ def train(args):
 
     # set torch device
     device = torch.device("cuda" if args.ngpu > 0 else "cpu")
+    logging.warn(f"Training on {device}")
     if args.train_dtype in ("float16", "float32", "float64"):
         dtype = getattr(torch, args.train_dtype)
     else:
