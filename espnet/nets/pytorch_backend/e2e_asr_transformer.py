@@ -81,7 +81,42 @@ class E2E(ASRInterface, torch.nn.Module):
 
         if args.transformer_attn_dropout_rate is None:
             args.transformer_attn_dropout_rate = args.dropout_rate
-        self.encoder = Encoder(
+        self.encoder = self.build_encoder(idim, args)
+        if args.mtlalpha < 1:
+            self.decoder = self.build_decoder(odim, args)
+            self.criterion = self.build_criterion(odim, ignore_id, args)
+        else:
+            self.decoder = None
+            self.criterion = None
+
+        self.blank = 0
+        self.sos = odim - 1
+        self.eos = odim - 1
+        self.odim = odim
+        self.ignore_id = ignore_id
+        self.subsample = get_subsample(args, mode="asr", arch="transformer")
+        self.reporter = Reporter()
+
+        self.reset_parameters(args)
+        self.adim = args.adim  # used for CTC (equal to d_model)
+        self.mtlalpha = args.mtlalpha
+        if args.mtlalpha > 0.0:
+            self.ctc = self.build_ctc(odim, args)
+        else:
+            self.ctc = None
+
+        self.error_calculator = ErrorCalculator(
+            args.char_list,
+            args.sym_space,
+            args.sym_blank,
+            args.report_cer,
+            args.report_wer,
+        )
+
+        self.rnnlm = None
+
+    def build_encoder(self, idim, args):
+        return Encoder(
             idim=idim,
             selfattention_layer_type=args.transformer_encoder_selfattn_layer_type,
             attention_dim=args.adim,
@@ -96,60 +131,38 @@ class E2E(ASRInterface, torch.nn.Module):
             positional_dropout_rate=args.dropout_rate,
             attention_dropout_rate=args.transformer_attn_dropout_rate,
         )
-        if args.mtlalpha < 1:
-            self.decoder = Decoder(
-                odim=odim,
-                selfattention_layer_type=args.transformer_decoder_selfattn_layer_type,
-                attention_dim=args.adim,
-                attention_heads=args.aheads,
-                conv_wshare=args.wshare,
-                conv_kernel_length=args.ldconv_decoder_kernel_length,
-                conv_usebias=args.ldconv_usebias,
-                linear_units=args.dunits,
-                num_blocks=args.dlayers,
-                dropout_rate=args.dropout_rate,
-                positional_dropout_rate=args.dropout_rate,
-                self_attention_dropout_rate=args.transformer_attn_dropout_rate,
-                src_attention_dropout_rate=args.transformer_attn_dropout_rate,
-            )
-            self.criterion = LabelSmoothingLoss(
-                odim,
-                ignore_id,
-                args.lsm_weight,
-                args.transformer_length_normalized_loss,
-            )
-        else:
-            self.decoder = None
-            self.criterion = None
-        self.blank = 0
-        self.sos = odim - 1
-        self.eos = odim - 1
-        self.odim = odim
-        self.ignore_id = ignore_id
-        self.subsample = get_subsample(args, mode="asr", arch="transformer")
-        self.reporter = Reporter()
 
-        self.reset_parameters(args)
-        self.adim = args.adim  # used for CTC (equal to d_model)
-        self.mtlalpha = args.mtlalpha
-        if args.mtlalpha > 0.0:
-            self.ctc = CTC(
-                odim, args.adim, args.dropout_rate, ctc_type=args.ctc_type, reduce=True
-            )
-        else:
-            self.ctc = None
+    def build_decoder(self, odim, args):
+        return Decoder(
+            odim=odim,
+            selfattention_layer_type=args.transformer_decoder_selfattn_layer_type,
+            attention_dim=args.adim,
+            attention_heads=args.aheads,
+            conv_wshare=args.wshare,
+            conv_kernel_length=args.ldconv_decoder_kernel_length,
+            conv_usebias=args.ldconv_usebias,
+            linear_units=args.dunits,
+            num_blocks=args.dlayers,
+            dropout_rate=args.dropout_rate,
+            positional_dropout_rate=args.dropout_rate,
+            self_attention_dropout_rate=args.transformer_attn_dropout_rate,
+            src_attention_dropout_rate=args.transformer_attn_dropout_rate,
+            teacher_adim=getattr(args, "teacher_adim", None)
+        )
 
-        if args.report_cer or args.report_wer:
-            self.error_calculator = ErrorCalculator(
-                args.char_list,
-                args.sym_space,
-                args.sym_blank,
-                args.report_cer,
-                args.report_wer,
-            )
-        else:
-            self.error_calculator = None
-        self.rnnlm = None
+    def build_criterion(self, odim, ignore_id, args):
+        return LabelSmoothingLoss(
+            odim,
+            ignore_id,
+            args.lsm_weight,
+            args.transformer_length_normalized_loss,
+        )
+
+    def build_ctc(self, odim, args):
+        return CTC(
+            odim, args.adim, args.dropout_rate, 
+            ctc_type=args.ctc_type, reduce=True
+        )
 
     def reset_parameters(self, args):
         """Initialize parameters."""
