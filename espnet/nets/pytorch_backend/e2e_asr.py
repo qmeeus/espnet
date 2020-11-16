@@ -54,7 +54,7 @@ class Reporter(chainer.Chain):
         reporter.report({"cer_ctc": cer_ctc}, self)
         reporter.report({"cer": cer}, self)
         reporter.report({"wer": wer}, self)
-        logging.info("mtl loss:" + str(mtl_loss))
+        logging.debug("mtl loss:" + str(mtl_loss))
         reporter.report({"loss": mtl_loss}, self)
 
 

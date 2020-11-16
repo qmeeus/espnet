@@ -232,7 +232,7 @@ class CustomUpdater(StandardUpdater):
         grad_norm = torch.nn.utils.clip_grad_norm_(
             self.model.parameters(), self.grad_clip_threshold
         )
-        logging.info("grad norm={}".format(grad_norm))
+        logging.debug("grad norm={}".format(grad_norm))
         if math.isnan(grad_norm):
             logging.warning("grad norm is nan. Do not update model.")
         else:
@@ -658,7 +658,7 @@ def train(args):
 
     # Resume from a snapshot
     if args.resume:
-        logging.info("resumed from %s" % args.resume)
+        logging.warn("resumed from %s" % args.resume)
         torch_resume(args.resume, trainer)
 
     # Evaluate the model with the test dataset for each epoch
