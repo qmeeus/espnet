@@ -153,7 +153,7 @@ class E2E(ASRTransformer):
         if self.alpha_mse > 0:
             self.mse_loss_fct = MaskedMSELoss(reduction="sum")
         if self.alpha_cos > 0:
-            self.cos_loss_fct = nn.CosineEmbeddingLoss(reduction="mean")
+            self.cosine_loss_fct = nn.CosineEmbeddingLoss(reduction="mean")
 
         self.teacher_odim = args.teacher_odim
 
