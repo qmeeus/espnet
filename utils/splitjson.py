@@ -40,11 +40,10 @@ if __name__ == "__main__":
     logging.info(get_commandline_args())
 
     # check directory
-    filename = os.path.basename(args.json).split(".")[0]
+    filename = ".".join(os.path.basename(args.json).split(".")[:-1])
     dirname = os.path.dirname(args.json)
     dirname = "{}/split{}utt".format(dirname, args.parts)
-    if not os.path.exists(dirname):
-        os.makedirs(dirname)
+    os.makedirs(dirname, exist_ok=True)
 
     # load json and split keys
     j = json.load(codecs.open(args.json, "r", encoding="utf-8"))
