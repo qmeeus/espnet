@@ -13,6 +13,7 @@ test_sets="dev test"
 trans_type=phn
 
 asr_config=conf/train_asr.yaml
+lm_config=conf/train_lm_rnn.yaml
 inference_config=conf/decode_asr.yaml
 
 ./asr.sh \
@@ -22,6 +23,7 @@ inference_config=conf/decode_asr.yaml
     --test_sets "${test_sets}" \
     --use_lm false \
     --asr_config "${asr_config}" \
+    --lm_config "${lm_config}" \
     --inference_config "${inference_config}" \
     --local_data_opts "--trans_type ${trans_type}" \
     --srctexts "data/${train_set}/text" "$@"
