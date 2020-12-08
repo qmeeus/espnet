@@ -442,10 +442,11 @@ def train(args):
         )
     assert isinstance(model, ASRInterface)
 
-    logging.info(
-        " Total parameter of the model = "
-        + str(sum(p.numel() for p in model.parameters()))
-    )
+    for line in str(model).split("\n"):
+        logging.info(line)
+
+    nparams = sum(p.numel() for p in model.parameters())
+    logging.info(f" Total parameter of the model = {nparams:,}")
 
     if args.rnnlm is not None:
         rnnlm_args = get_model_conf(args.rnnlm, args.rnnlm_conf)
