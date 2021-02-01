@@ -423,6 +423,7 @@ def get_parser():
         help="CTC weight in joint decoding",
     )
     group.add_argument("--lm_weight", type=float, default=1.0, help="RNNLM weight")
+    group.add_argument("--streaming", type=str2bool, default=False)
 
     group = parser.add_argument_group("Text converter related")
     group.add_argument(
@@ -440,7 +441,6 @@ def get_parser():
         help="The model path of sentencepiece. "
         "If not given, refers from the training args",
     )
-    group.add_argument("--streaming", type=str2bool, default=False)
 
     return parser
 
