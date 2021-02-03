@@ -1171,8 +1171,8 @@ class AbsTask(ABC):
                     ngpu=args.ngpu,
                     preprocess_fn=cls.build_preprocess_fn(args, train=False),
                     collate_fn=cls.build_collate_fn(args, train=False),
-                    hop_length=args.frontend_conf.hop_length,
-                    sample_rate=args.frontend_conf.sample_rate,
+                    hop_length=args.frontend_conf["hop_length"],
+                    sample_rate=args.frontend_conf["fs"],
                 ),
                 valid_iter=cls.build_streaming_iterator(
                     data_path_and_name_and_type=args.valid_data_path_and_name_and_type,
@@ -1184,8 +1184,8 @@ class AbsTask(ABC):
                     ngpu=args.ngpu,
                     preprocess_fn=cls.build_preprocess_fn(args, train=False),
                     collate_fn=cls.build_collate_fn(args, train=False),
-                    hop_length=args.frontend_conf.hop_length,
-                    sample_rate=args.frontend_conf.sample_rate,
+                    hop_length=args.frontend_conf["hop_length"],
+                    sample_rate=args.frontend_conf["fs"],
                 ),
                 output_dir=output_dir,
                 ngpu=args.ngpu,
@@ -1426,8 +1426,8 @@ class AbsTask(ABC):
             preprocess=iter_options.preprocess_fn,
             max_cache_size=iter_options.max_cache_size,
             max_cache_fd=iter_options.max_cache_fd,
-            hop_length=args.frontend_conf.hop_length,
-            sample_rate=args.frontend_conf.sample_rate,
+            hop_length=args.frontend_conf["hop_length"],
+            sample_rate=args.frontend_conf["fs"],
         )
         cls.check_task_requirements(
             dataset, args.allow_variable_data_keys, train=iter_options.train
@@ -1509,8 +1509,8 @@ class AbsTask(ABC):
             preprocess=iter_options.preprocess_fn,
             max_cache_size=iter_options.max_cache_size,
             max_cache_fd=iter_options.max_cache_fd,
-            hop_length=args.frontend_conf.hop_length,
-            sample_rate=args.frontend_conf.sample_rate,
+            hop_length=args.frontend_conf["hop_length"],
+            sample_rate=args.frontend_conf["fs"],
         )
         cls.check_task_requirements(
             dataset, args.allow_variable_data_keys, train=iter_options.train
