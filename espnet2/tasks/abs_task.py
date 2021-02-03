@@ -1701,6 +1701,8 @@ class AbsTask(ABC):
         allow_variable_data_keys: bool = False,
         ngpu: int = 0,
         inference: bool = False,
+        hop_length: int = 128,
+        sample_rate: int = 16000,
     ) -> DataLoader:
         """Build DataLoader using iterable dataset"""
         assert check_argument_types()
@@ -1727,6 +1729,8 @@ class AbsTask(ABC):
                 data_path_and_name_and_type,
                 float_dtype=dtype,
                 preprocess=preprocess_fn,
+                hop_length=hop_length,
+                sample_rate=sample_rate,
             )
             if key_file is None:
                 key_file = data_path_and_name_and_type[0][0]
