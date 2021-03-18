@@ -906,36 +906,43 @@
 
 |dataset|Snt|Wrd|Corr|Sub|Del|Ins|Err|S.Err|
 |---|---|---|---|---|---|---|---|---|
-|decode_dev_kab_decode_rnn_lm|13384|56739|78.9|19.0|2.1|1.3|22.4|52.3|
-|decode_test_kab_decode_rnn_lm|13384|61644|78.0|19.5|2.6|1.4|23.5|55.5|
+|decode_valid_dev_zh_TW_decode_lm|3979|3979|15.8|84.2|0.0|0.0|84.2|84.2|
+|decode_valid_test_zh_TW_decode_lm|4067|4067|15.2|84.8|0.0|0.0|84.8|84.8|
+```
 
-## train_pl_pytorch_rnn
+# Czech results (Conformer/RNN-Transducer, enc: VGG2L + 12 x Conformer, dec: 3 x LSTM)
+
+- Environments
+  - date: `Thu Nov 27 12:25:08 CET 2020`
+  - python version: `3.7.6 (default, Jan  8 2020, 19:59:22)  [GCC 7.3.0]`
+  - espnet version: `espnet 0.9.4`
+  - chainer version: `chainer 6.0.0`
+  - pytorch version: `pytorch 1.4.0`
+  - Git hash: `e9c1a554f0fbeeaeedd0f7e5c9ab096d243011b2`
+  - Commit date: `Wed Nov 18 22:06:15 2020 +0100`
+
+- Model files (archived to cs_conformer-rnn_transducer.tar.gz by `$ pack_model.sh`)
+  - model link: https://drive.google.com/open?id=1qTINFIvzy0O6ZaSvLVKYB-7dUyQP-gTj
+  - training config file: `conf/tuning/train_conformer-rnn_transducer.yaml`
+  - decoding config file: `conf/tuning/decode_transducer.yaml`
+  - cmvn file: `data/train_cs/cmvn.ark`
+  - e2e file: `exp/train_cs_pytorch_train_conformer-rnn_transducer/results/model.last5.avg.best`
+  - e2e JSON file: `exp/train_cs_pytorch_train_conformer-rnn_transducer/results/model.json`
+  - lm file: `exp/train_cs_rnnlm_pytorch_lm_unigram150/rnnlm.model.best`
+  - lm JSON file: `exp/train_cs_rnnlm_pytorch_lm_unigram150/model.json`
+  - dict file: `data/cs_lang_char/`
+
+## train_cs_pytorch_train_conformer-rnn_transducer
 ### CER
 
 |dataset|Snt|Wrd|Corr|Sub|Del|Ins|Err|S.Err|
 |---|---|---|---|---|---|---|---|---|
-|decode_dev_pl_decode_rnn_lm|4458|126403|88.8|6.6|4.6|1.2|12.4|66.2|
-|decode_test_pl_decode_rnn_lm|4458|118405|92.3|4.8|2.9|1.0|8.7|48.1|
+|decode_dev_cs_decode_transducer_lm|2584|62452|90.9|6.7|2.4|1.4|10.4|48.2|
+|decode_test_cs_decode_transducer_lm|2574|65232|87.5|9.7|2.8|2.2|14.7|54.7|
 
 ### WER
 
 |dataset|Snt|Wrd|Corr|Sub|Del|Ins|Err|S.Err|
 |---|---|---|---|---|---|---|---|---|
-|decode_dev_pl_decode_rnn_lm|4458|32280|75.0|22.0|3.0|2.1|27.0|66.2|
-|decode_test_pl_decode_rnn_lm|4458|31588|84.3|13.0|2.6|1.4|17.1|48.0|
-
-## train_pl_pytorch_sp_transformer
-### CER
-
-|dataset|Snt|Wrd|Corr|Sub|Del|Ins|Err|S.Err|
-|---|---|---|---|---|---|---|---|---|
-|decode_dev_pl_decode_lm|4458|127033|96.4|1.7|1.9|0.3|3.8|28.1|
-|decode_test_pl_decode_lm|4458|118825|98.8|0.6|0.5|0.2|1.3|8.2|
-
-### WER
-
-|dataset|Snt|Wrd|Corr|Sub|Del|Ins|Err|S.Err|
-|---|---|---|---|---|---|---|---|---|
-|decode_dev_pl_decode_lm|4458|32280|91.6|7.8|0.6|0.5|8.9|28.1|
-|decode_test_pl_decode_lm|4458|31588|97.6|2.1|0.3|0.2|2.6|8.1|
-
+|decode_dev_cs_decode_transducer_lm|2584|16239|82.1|15.4|2.4|2.1|19.9|48.2|
+|decode_test_cs_decode_transducer_lm|2574|16508|75.6|21.8|2.5|3.2|27.6|54.7|
