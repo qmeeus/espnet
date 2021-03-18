@@ -35,18 +35,12 @@ def load_rttm_text(path: Union[Path, str]) -> Dict[str, List[Tuple[str, float, f
                 continue
             if spk_id not in spk_list:
                 spk_list.append(spk_id)
-<<<<<<< HEAD
-            data[utt_id] = spk_list, spk_event + [
-                (spk_id, float(start), float(start) + float(duration))
-            ]
-=======
 
             data[utt_id] = (
                 spk_list,
                 spk_event + [(spk_id, int(float(start)), int(float(end)))],
                 max_duration,
             )
->>>>>>> 78edd8dba... train infer runnable
 
     return data
 

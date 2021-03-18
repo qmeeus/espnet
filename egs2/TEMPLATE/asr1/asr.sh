@@ -283,8 +283,8 @@ if [ "${token_type}" = bpe ]; then
 elif [ "${token_type}" = char ]; then
     token_list="${chartoken_list}"
     bpemodel=none
-elif [ "${token_type}" = phn ]; then
-    token_list="${phntoken_list}"
+elif [ "${token_type}" = word ]; then
+    token_list="${wordtoken_list}"
     bpemodel=none
 else
     log "Error: not supported --token_type '${token_type}'"
@@ -508,7 +508,7 @@ if ! "${skip_data_prep}"; then
                 fi
                 # Generate dummy wav.scp to avoid error by copy_data_dir.sh
                 <data/"${dset}"/cmvn.scp awk ' { print($1,"<DUMMY>") }' > data/"${dset}"/wav.scp
-                utils/copy_data_dir.sh data/"${dset}" "${data_feats}${_suf}/${dset}"
+                utils/copy_data_dir.sh --validate_opts --non-print data/"${dset}" "${data_feats}${_suf}/${dset}"
 
                 pyscripts/feats/feat-to-shape.py "scp:head -n 1 ${data_feats}${_suf}/${dset}/feats.scp |" - | \
                     awk '{ print $2 }' | cut -d, -f2 > "${data_feats}${_suf}/${dset}/feats_dim"
@@ -618,14 +618,23 @@ if ! "${skip_data_prep}"; then
             echo "${sos_eos}"
             } > "${token_list}"
 
-        elif [ "${token_type}" = char ]; then
+        elif [ "${token_type}" = char ] || [ "${token_type}" = word ]; then
             log "Stage 5: Generate character level token_list from ${lm_train_text}"
 
             _opts="--non_linguistic_symbols ${nlsyms_txt}"
 
-        elif [ "${token_type}" = phn ]; then
-            log "Stage 5: Generate phone level token_list from ${data_feats}/srctexts"
-            _opts="--non_linguistic_symbols ${nlsyms_txt}"
+            # The first symbol in token_list must be "<blank>" and the last must be also sos/eos:
+            # 0 is reserved for CTC-blank for ASR and also used as ignore-index in the other task
+            ${python} -m espnet2.bin.tokenize_text  \
+                --token_type "${token_type}" \
+                --input "${data_feats}/lm_train.txt" --output "${token_list}" ${_opts} \
+                --field 2- \
+                --cleaner "${cleaner}" \
+                --g2p "${g2p}" \
+                --write_vocabulary true \
+                --add_symbol "${blank}:0" \
+                --add_symbol "${oov}:1" \
+                --add_symbol "${sos_eos}:-1"
 
         else
             log "Error: not supported --token_type '${token_type}'"
@@ -633,7 +642,7 @@ if ! "${skip_data_prep}"; then
         fi
 
         # Create word-list for word-LM training
-        if ${use_word_lm}; then
+        if ${use_word_lm} && [ "${token_type}" != word ]; then
             log "Generate word level token_list from ${data_feats}/lm_train.txt"
             ${python} -m espnet2.bin.tokenize_text \
                 --token_type word \
@@ -1254,32 +1263,6 @@ if ! "${skip_eval}"; then
                         <(<"${_data}/utt2spk" awk '{ print "(" $2 "-" $1 ")" }') \
                             >"${_scoredir}/hyp.trn"
 
-                elif [ "${_type}" = per ]; then
-                    # Tokenize text to phone level
-                    paste \
-                        <(<"${_data}/text" \
-                              ${python} -m espnet2.bin.tokenize_text  \
-                                  -f 2- --input - --output - \
-                                  --token_type word \
-                                  --non_linguistic_symbols "${nlsyms_txt}" \
-                                  --remove_non_linguistic_symbols true \
-                                  --space_symbol "<space>" \
-                                  --cleaner "${cleaner}" \
-                                  ) \
-                        <(<"${_data}/utt2spk" awk '{ print "(" $2 "-" $1 ")" }') \
-                            >"${_scoredir}/ref.trn"
-
-                    # NOTE(kamo): Don't use cleaner for hyp
-                    paste \
-                        <(<"${_dir}/token"  \
-                              ${python} -m espnet2.bin.tokenize_text  \
-                                  -f 2- --input - --output - \
-                                  --token_type word \
-                                  --non_linguistic_symbols "${nlsyms_txt}" \
-                                  --remove_non_linguistic_symbols true \
-                                  ) \
-                        <(<"${_data}/utt2spk" awk '{ print "(" $2 "-" $1 ")" }') \
-                            >"${_scoredir}/hyp.trn"
                 fi
 
                 sclite \

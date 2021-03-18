@@ -11,7 +11,7 @@ _ia_id_it_ja_ka_kab_ky_lv_mn_mt_nl_or\
 _pa-IN_pl_pt_rm-sursilv_rm-vallader_ro\
 _ru_rw_sah_sl_sv-SE_ta_tr_tt_uk_vi_\
 zh-CN_zh-HK_zh-TW"
-lid=false # whether to use language id as additional label
+lid=true # whether to use language id as additional label
 
 train_set=train_li52_lid
 train_dev=dev_li52_lid
@@ -35,11 +35,7 @@ test_dv_commonvoice_lid test_el_commonvoice_lid test_et_commonvoice_lid \
 test_fy_NL_commonvoice_lid test_id_commonvoice_lid test_ja_commonvoice_lid \
 test_ky_commonvoice_lid test_mn_commonvoice_lid test_mt_commonvoice_lid \
 test_sv_SE_commonvoice_lid test_ta_commonvoice_lid"
-<<<<<<< HEAD
 # extremely low resource (<=5h): as, cnh, cv, ga_IE, hsb, ia, ka, lv, or, pa_IN,
-=======
-# extremely low resource (<=5h): as, cnh, cv, ga_IE, hsb, ia, ka, lv, or, pa_IN, 
->>>>>>> 2d1e38317... add lang id scoring & add normalization
 #                                rm_sursilv, rm_vallader, ro, sah, sl, vi (16)
 ext_low_resource_test_set="test_as_commonvoice_lid test_cnh_commonvoice_lid \
 test_cv_commonvoice_lid test_ga_IE_commonvoice_lid test_hsb_commonvoice_lid \

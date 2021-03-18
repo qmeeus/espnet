@@ -199,6 +199,10 @@ class ESPnetASRModel(AbsESPnetModel):
             if self.normalize is not None:
                 feats, feats_lengths = self.normalize(feats, feats_lengths)
 
+        # Pre-encoder, e.g. used for raw input data
+        if self.preencoder is not None:
+            feats, feats_lengths = self.preencoder(feats, feats_lengths)
+
         # 4. Forward encoder
         # feats: (Batch, Length, Dim)
         # -> encoder_out: (Batch, Length2, Dim2)

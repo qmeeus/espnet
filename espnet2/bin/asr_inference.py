@@ -319,7 +319,12 @@ def inference(
             batch = {k: v[0] for k, v in batch.items() if not k.endswith("_lengths")}
 
             # N-best list of (text, token, token_int, hyp_object)
-            results = speech2text(**batch)
+            try:
+                results = speech2text(**batch)
+            except TooShortUttError as e:
+                logging.warning(f"Utterance {keys} {e}")
+                hyp = Hypothesis(score=0.0, scores={}, states={}, yseq=[])
+                results = [[" ", ["<space>"], [2], hyp]] * nbest
 
             # Only supporting batch_size==1
             key = keys[0]
