@@ -906,9 +906,38 @@
 
 |dataset|Snt|Wrd|Corr|Sub|Del|Ins|Err|S.Err|
 |---|---|---|---|---|---|---|---|---|
-|decode_valid_dev_zh_TW_decode_lm|3979|3979|15.8|84.2|0.0|0.0|84.2|84.2|
-|decode_valid_test_zh_TW_decode_lm|4067|4067|15.2|84.8|0.0|0.0|84.8|84.8|
-```
+|decode_dev_kab_decode_rnn_lm|13384|56739|78.9|19.0|2.1|1.3|22.4|52.3|
+|decode_test_kab_decode_rnn_lm|13384|61644|78.0|19.5|2.6|1.4|23.5|55.5|
+
+## train_pl_pytorch_rnn
+### CER
+
+|dataset|Snt|Wrd|Corr|Sub|Del|Ins|Err|S.Err|
+|---|---|---|---|---|---|---|---|---|
+|decode_dev_pl_decode_rnn_lm|4458|126403|88.8|6.6|4.6|1.2|12.4|66.2|
+|decode_test_pl_decode_rnn_lm|4458|118405|92.3|4.8|2.9|1.0|8.7|48.1|
+
+### WER
+
+|dataset|Snt|Wrd|Corr|Sub|Del|Ins|Err|S.Err|
+|---|---|---|---|---|---|---|---|---|
+|decode_dev_pl_decode_rnn_lm|4458|32280|75.0|22.0|3.0|2.1|27.0|66.2|
+|decode_test_pl_decode_rnn_lm|4458|31588|84.3|13.0|2.6|1.4|17.1|48.0|
+
+## train_pl_pytorch_sp_transformer
+### CER
+
+|dataset|Snt|Wrd|Corr|Sub|Del|Ins|Err|S.Err|
+|---|---|---|---|---|---|---|---|---|
+|decode_dev_pl_decode_lm|4458|127033|96.4|1.7|1.9|0.3|3.8|28.1|
+|decode_test_pl_decode_lm|4458|118825|98.8|0.6|0.5|0.2|1.3|8.2|
+
+### WER
+
+|dataset|Snt|Wrd|Corr|Sub|Del|Ins|Err|S.Err|
+|---|---|---|---|---|---|---|---|---|
+|decode_dev_pl_decode_lm|4458|32280|91.6|7.8|0.6|0.5|8.9|28.1|
+|decode_test_pl_decode_lm|4458|31588|97.6|2.1|0.3|0.2|2.6|8.1|
 
 ---
 
