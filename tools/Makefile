@@ -54,11 +54,9 @@ PIP_CHAINER := chainer==$(CHAINER_VERSION)
 all: kaldi showenv python conda_packages.done sctk.done sph2pipe.done check_install
 
 ifneq ($(strip $(CHAINER_VERSION)),)
-python: activate_python.sh espnet.done pytorch.done chainer.done
-extra: warp-ctc.done warp-transducer.done chainer_ctc.done nkf.done moses.done mwerSegmenter.done pesq kenlm.done pyopenjtalk.done py3mmseg.done beamformit.done
+python: activate_python.sh espnet.done pytorch.done chainer_ctc.done chainer.done
 else
 python: activate_python.sh espnet.done pytorch.done
-extra: warp-ctc.done warp-transducer.done nkf.done moses.done mwerSegmenter.done pesq kenlm.done pyopenjtalk.done py3mmseg.done beamformit.done
 endif
 
 
@@ -151,23 +149,19 @@ endif
 	touch chainer.done
 
 # NOTE(kamo): Add conda_packages.done if cmake is used
-warp-ctc.done: pytorch.done conda_packages.done
-ifeq ($(strip $(CPU_ONLY)),)
-	[ -n "${CUDA_HOME}" ] || { echo -e "Error: CUDA_HOME is not set.\n    $$ . ./setup_cuda_env.sh <cuda-root>"; exit 1; }
-endif
-	. ./activate_python.sh && ./installers/install_warp-ctc.sh
-	touch warp-ctc.done
+#warp-ctc.done: pytorch.done conda_packages.done
+#	. ./activate_python.sh && ./installers/install_warp-ctc.sh
+#	touch warp-ctc.done
 
-warp-transducer.done: pytorch.done conda_packages.done
-ifeq ($(strip $(CPU_ONLY)),)
-	[ -n "${CUDA_HOME}" ] || { echo -e "Error: CUDA_HOME is not set.\n    $$ . ./setup_cuda_env.sh <cuda-root>"; exit 1; }
-	. ./activate_python.sh && ./installers/install_warp-transducer.sh
-	. ./activate_python.sh &&  ./installers/install_warp-rnnt.sh $(CUDA_VERSION)
-	touch warp-transducer.done
-else
-	. ./activate_python.sh && ./installers/install_warp-transducer.sh
-	touch warp-transducer.done
-endif
+#warp-transducer.done: pytorch.done conda_packages.done
+#ifeq ($(strip $(CPU_ONLY)),)
+#	. ./activate_python.sh && ./installers/install_warp-transducer.sh
+#	. ./activate_python.sh &&  ./installers/install_warp-rnnt.sh $(CUDA_VERSION)
+#	touch warp-transducer.done
+#else
+#	. ./activate_python.sh && ./installers/install_warp-transducer.sh
+#	touch warp-transducer.done
+#endif
 
 chainer_ctc.done: chainer.done
 ifeq ($(strip $(CPU_ONLY)),)
