@@ -4,11 +4,6 @@
 """Transformer speech recognition model (pytorch)."""
 
 from argparse import Namespace
-<<<<<<< HEAD
-from itertools import groupby
-=======
-from distutils.util import strtobool
->>>>>>> 6401c5a83... initial commit
 import logging
 import math
 
