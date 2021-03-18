@@ -64,7 +64,8 @@ fi
 # =======================================================================================
 #                              DICTIONARY AND SUBSETS
 # =======================================================================================
-dict=data/lang_1char/${train_set}_units.txt
+# dict=data/lang_1char/${train_set}_units.txt
+dict=data/lang_unigram/${train_set}_units.txt
 echo "dictionary: ${dict}"
 if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
     ### Task dependent. You have to check non-linguistic symbols used in the corpus.

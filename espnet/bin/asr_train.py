@@ -12,6 +12,8 @@ import random
 import subprocess
 import sys
 
+from distutils.version import LooseVersion
+
 import configargparse
 import numpy as np
 import torch

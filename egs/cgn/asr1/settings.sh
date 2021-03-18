@@ -39,6 +39,8 @@ decodecomp="o;k"  # ;l;j;m;n;g;f;b;h;a;i
 tag="" # tag for managing experiments.
 
 # datasets
-train_set="train_s_"
-train_dev="dev_s"
+# train_set="train_s_"
+# train_dev="dev_s"
+train_set=CGN_train
+train_dev=CGN_valid
 
