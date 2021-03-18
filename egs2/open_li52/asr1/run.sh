@@ -35,7 +35,11 @@ test_dv_commonvoice_lid test_el_commonvoice_lid test_et_commonvoice_lid \
 test_fy_NL_commonvoice_lid test_id_commonvoice_lid test_ja_commonvoice_lid \
 test_ky_commonvoice_lid test_mn_commonvoice_lid test_mt_commonvoice_lid \
 test_sv_SE_commonvoice_lid test_ta_commonvoice_lid"
+<<<<<<< HEAD
 # extremely low resource (<=5h): as, cnh, cv, ga_IE, hsb, ia, ka, lv, or, pa_IN,
+=======
+# extremely low resource (<=5h): as, cnh, cv, ga_IE, hsb, ia, ka, lv, or, pa_IN, 
+>>>>>>> 2d1e38317... add lang id scoring & add normalization
 #                                rm_sursilv, rm_vallader, ro, sah, sl, vi (16)
 ext_low_resource_test_set="test_as_commonvoice_lid test_cnh_commonvoice_lid \
 test_cv_commonvoice_lid test_ga_IE_commonvoice_lid test_hsb_commonvoice_lid \
@@ -70,5 +74,6 @@ inference_config=conf/decode_asr.yaml
     --valid_set "${train_dev}" \
     --test_sets "${test_set}" \
     --nlsyms_txt "${nlsyms_txt}" \
-    --lm_train_text "data/${train_set}/text" "$@"
+    --lm_train_text "data/${train_set}/text" \
+    --score_lang_id "${lid}" "$@"
 
