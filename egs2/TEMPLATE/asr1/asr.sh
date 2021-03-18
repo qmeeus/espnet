@@ -262,6 +262,7 @@ bpeprefix="${bpedir}"/bpe
 bpemodel="${bpeprefix}".model
 bpetoken_list="${bpedir}"/tokens.txt
 chartoken_list="${token_listdir}"/char/tokens.txt
+phntoken_list="${token_listdir}"/phn/tokens.txt
 # NOTE: keep for future development.
 # shellcheck disable=SC2034
 wordtoken_list="${token_listdir}"/word/tokens.txt
@@ -270,6 +271,9 @@ if [ "${token_type}" = bpe ]; then
     token_list="${bpetoken_list}"
 elif [ "${token_type}" = char ]; then
     token_list="${chartoken_list}"
+    bpemodel=none
+elif [ "${token_type}" = phn ]; then
+    token_list="${phntoken_list}"
     bpemodel=none
 else
     log "Error: not supported --token_type '${token_type}'"
@@ -586,18 +590,9 @@ if ! "${skip_data_prep}"; then
 
             _opts="--non_linguistic_symbols ${nlsyms_txt}"
 
-            # The first symbol in token_list must be "<blank>" and the last must be also sos/eos:
-            # 0 is reserved for CTC-blank for ASR and also used as ignore-index in the other task
-            ${python} -m espnet2.bin.tokenize_text  \
-                --token_type "${token_type}" \
-                --input "${data_feats}/lm_train.txt" --output "${token_list}" ${_opts} \
-                --field 2- \
-                --cleaner "${cleaner}" \
-                --g2p "${g2p}" \
-                --write_vocabulary true \
-                --add_symbol "${blank}:0" \
-                --add_symbol "${oov}:1" \
-                --add_symbol "${sos_eos}:-1"
+        elif [ "${token_type}" = phn ]; then
+            log "Stage 5: Generate phone level token_list from ${data_feats}/srctexts"
+            _opts="--non_linguistic_symbols ${nlsyms_txt}"
 
         else
             log "Error: not supported --token_type '${token_type}'"
@@ -1138,16 +1133,12 @@ if ! "${skip_eval}"; then
 
     if [ ${stage} -le 12 ] && [ ${stop_stage} -ge 12 ]; then
         log "Stage 12: Scoring"
-        if [ "${token_type}" = pnh ]; then
-            log "Error: Not implemented for token_type=phn"
-            exit 1
-        fi
 
         for dset in ${test_sets}; do
             _data="${data_feats}/${dset}"
             _dir="${asr_exp}/${inference_tag}/${dset}"
 
-            for _type in cer wer ter; do
+            for _type in cer wer ter per; do
                 [ "${_type}" = ter ] && [ ! -f "${bpemodel}" ] && continue
 
                 _scoredir="${_dir}/score_${_type}"
@@ -1226,6 +1217,33 @@ if ! "${skip_eval}"; then
                                   -f 2- --input - --output - \
                                   --token_type bpe \
                                   --bpemodel "${bpemodel}" \
+                                  ) \
+                        <(<"${_data}/utt2spk" awk '{ print "(" $2 "-" $1 ")" }') \
+                            >"${_scoredir}/hyp.trn"
+
+                elif [ "${_type}" = per ]; then
+                    # Tokenize text to phone level
+                    paste \
+                        <(<"${_data}/text" \
+                              ${python} -m espnet2.bin.tokenize_text  \
+                                  -f 2- --input - --output - \
+                                  --token_type word \
+                                  --non_linguistic_symbols "${nlsyms_txt}" \
+                                  --remove_non_linguistic_symbols true \
+                                  --space_symbol "<space>" \
+                                  --cleaner "${cleaner}" \
+                                  ) \
+                        <(<"${_data}/utt2spk" awk '{ print "(" $2 "-" $1 ")" }') \
+                            >"${_scoredir}/ref.trn"
+
+                    # NOTE(kamo): Don't use cleaner for hyp
+                    paste \
+                        <(<"${_dir}/token"  \
+                              ${python} -m espnet2.bin.tokenize_text  \
+                                  -f 2- --input - --output - \
+                                  --token_type word \
+                                  --non_linguistic_symbols "${nlsyms_txt}" \
+                                  --remove_non_linguistic_symbols true \
                                   ) \
                         <(<"${_data}/utt2spk" awk '{ print "(" $2 "-" $1 ")" }') \
                             >"${_scoredir}/hyp.trn"
