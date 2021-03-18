@@ -47,20 +47,16 @@ class DefaultFrontend(AbsFrontend):
         # Deepcopy (In general, dict shouldn't be used as default arg)
         frontend_conf = copy.deepcopy(frontend_conf)
 
-        if apply_stft:
-            self.stft = Stft(
-                n_fft=n_fft,
-                win_length=win_length,
-                hop_length=hop_length,
-                center=center,
-                window=window,
-                normalized=normalized,
-                onesided=onesided,
-            )
-        else:
-            self.stft = None
         self.apply_stft = apply_stft
-
+        self.stft = Stft(
+            n_fft=n_fft,
+            win_length=win_length,
+            hop_length=hop_length,
+            center=center,
+            window=window,
+            normalized=normalized,
+            onesided=onesided,
+        )
         if frontend_conf is not None:
             self.frontend = Frontend(idim=n_fft // 2 + 1, **frontend_conf)
         else:
@@ -83,7 +79,7 @@ class DefaultFrontend(AbsFrontend):
         self, input: torch.Tensor, input_lengths: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # 1. Domain-conversion: e.g. Stft: time -> time-freq
-        if self.stft is not None:
+        if self.apply_stft:
             input_stft, feats_lens = self._compute_stft(input, input_lengths)
         else:
             input_stft = ComplexTensor(input[..., 0], input[..., 1])
@@ -116,9 +112,7 @@ class DefaultFrontend(AbsFrontend):
 
         return input_feats, feats_lens
 
-    def _compute_stft(
-        self, input: torch.Tensor, input_lengths: torch.Tensor
-    ) -> torch.Tensor:
+    def _compute_stft(self, input: torch.Tensor, input_lengths: torch.Tensor) -> torch.Tensor:
         input_stft, feats_lens = self.stft(input, input_lengths)
 
         assert input_stft.dim() >= 4, input_stft.shape
