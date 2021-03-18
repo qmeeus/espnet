@@ -54,9 +54,11 @@ PIP_CHAINER := chainer==$(CHAINER_VERSION)
 all: kaldi showenv python conda_packages.done sctk.done sph2pipe.done check_install
 
 ifneq ($(strip $(CHAINER_VERSION)),)
-python: activate_python.sh warp-ctc.done warp-transducer.done espnet.done pytorch.done chainer_ctc.done chainer.done
+python: activate_python.sh espnet.done pytorch.done chainer.done
+extra: warp-ctc.done warp-transducer.done chainer_ctc.done nkf.done moses.done mwerSegmenter.done pesq kenlm.done pyopenjtalk.done py3mmseg.done beamformit.done fairseq.done
 else
-python: activate_python.sh warp-ctc.done warp-transducer.done espnet.done pytorch.done
+python: activate_python.sh espnet.done pytorch.done
+extra: warp-ctc.done warp-transducer.done nkf.done moses.done mwerSegmenter.done pesq kenlm.done pyopenjtalk.done py3mmseg.done beamformit.done fairseq.done
 endif
 
 
@@ -201,6 +203,10 @@ py3mmseg.done: espnet.done
 beamformit.done:
 	./installers/install_beamformit.sh
 	touch beamformit.done
+
+fairseq.done: espnet.done
+	. ./activate_python.sh && ./installers/install_fairseq.sh
+	touch fairseq.done
 
 check_install: python
 	. ./activate_python.sh; . ./extra_path.sh; python3 check_install.py
