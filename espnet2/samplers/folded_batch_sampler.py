@@ -65,13 +65,12 @@ class FoldedBatchSampler(AbsSampler):
             utt2category = read_2column_text(utt2category_file)
             if set(utt2category) != set(first_utt2shape):
                 raise RuntimeError(
-                    "keys are mismatched between "
-                    f"{utt2category_file} != {shape_files[0]}"
+                    f"keys are mismatched between {utt2category_file} != {shape_files[0]}"
                 )
             for k in keys:
                 category2utt.setdefault(utt2category[k], []).append(k)
         else:
-            category2utt["default_category"] = keys
+            category2utt['default_category'] = keys
 
         self.batch_list = []
         for d, v in category2utt.items():
@@ -106,9 +105,7 @@ class FoldedBatchSampler(AbsSampler):
 
             if not self.drop_last:
                 # Bug check
-                assert sum(batch_sizes) == len(
-                    category_keys
-                ), f"{sum(batch_sizes)} != {len(category_keys)}"
+                assert sum(batch_sizes) == len(category_keys), f"{sum(batch_sizes)} != {len(category_keys)}"
 
             # Set mini-batch
             cur_batch_list = []
@@ -124,8 +121,7 @@ class FoldedBatchSampler(AbsSampler):
                     pass
                 else:
                     raise ValueError(
-                        "sort_in_batch must be ascending or "
-                        f"descending: {sort_in_batch}"
+                        f"sort_in_batch must be ascending or descending: {sort_in_batch}"
                     )
                 cur_batch_list.append(tuple(minibatch_keys))
 
