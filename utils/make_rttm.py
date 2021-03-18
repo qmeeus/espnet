@@ -5,16 +5,18 @@
 # Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
 
 import argparse
+import h5py
 import logging
 import numpy as np
-from espnet2.fileio.npy_scp import NpyScpReader
+import os
+from espnet2.utils.fileio.npy_scp import NpyScpReader
 from scipy.signal import medfilt
 
 parser = argparse.ArgumentParser(description="make rttm from decoded result")
 parser.add_argument("diarize_scp")
 parser.add_argument("out_rttm_file")
 parser.add_argument("--threshold", default=0.5, type=float)
-parser.add_argument("--frame_shift", default=128, type=int)
+parser.add_argument("--frame_shift", default=256, type=int)
 parser.add_argument("--subsampling", default=1, type=int)
 parser.add_argument("--median", default=1, type=int)
 parser.add_argument("--sampling_rate", default=8000, type=int)
