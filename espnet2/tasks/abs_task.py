@@ -552,32 +552,8 @@ class AbsTask(ABC):
             "--unused_parameters",
             type=bool,
             default=False,
-            help="Whether to use the find_unused_parameters in "
+            help="Weather to use the find_unused_parameters in "
             "torch.nn.parallel.DistributedDataParallel ",
-        )
-        group.add_argument(
-            "--use_tensorboard",
-            type=str2bool,
-            default=True,
-            help="Enable tensorboard logging",
-        )
-        group.add_argument(
-            "--use_wandb",
-            type=str2bool,
-            default=False,
-            help="Enable wandb logging",
-        )
-        group.add_argument(
-            "--wandb_project",
-            type=str,
-            default=None,
-            help="Specify wandb project",
-        )
-        group.add_argument(
-            "--wandb_id",
-            type=str,
-            default=None,
-            help="Specify wandb id",
         )
 
         group = parser.add_argument_group("Pretraining model related")
