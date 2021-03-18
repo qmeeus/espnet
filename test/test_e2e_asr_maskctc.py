@@ -29,9 +29,8 @@ def make_arg(**kwargs):
         mtlalpha=0.3,
         lsm_weight=0.001,
         wshare=4,
-        char_list=["<blank>", "a", "e", "<eos>", "<mask>"],
+        char_list=["<blank>", "a", "e", "i", "o", "u", "<eos>"],
         ctc_type="warpctc",
-        decoder_mode="maskctc",
     )
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)
@@ -43,8 +42,15 @@ def prepare(args):
     model = E2E(idim, odim, args)
     batchsize = 2
 
-    x = torch.randn(batchsize, 15, idim)
-    ilens = [15, 10]
+    T = importlib.import_module(
+        "espnet.nets.{}_backend.e2e_asr_maskctc".format("pytorch")
+    )
+
+    model = T.E2E(idim, odim, args)
+    batchsize = 5
+
+    x = torch.randn(batchsize, 40, idim)
+    ilens = [40, 30, 20, 15, 10]
     n_token = odim - 2  # w/o <eos>/<sos>, <mask>
     y = (torch.rand(batchsize, 10) * n_token % n_token).long()
     olens = [7, 6]
