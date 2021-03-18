@@ -55,10 +55,10 @@ all: kaldi showenv python conda_packages.done sctk.done sph2pipe.done check_inst
 
 ifneq ($(strip $(CHAINER_VERSION)),)
 python: activate_python.sh espnet.done pytorch.done chainer.done
-extra: warp-ctc.done warp-transducer.done chainer_ctc.done nkf.done moses.done mwerSegmenter.done pesq kenlm.done pyopenjtalk.done py3mmseg.done beamformit.done fairseq.done
+extra: warp-ctc.done warp-transducer.done chainer_ctc.done nkf.done moses.done mwerSegmenter.done pesq kenlm.done pyopenjtalk.done py3mmseg.done beamformit.done
 else
 python: activate_python.sh espnet.done pytorch.done
-extra: warp-ctc.done warp-transducer.done nkf.done moses.done mwerSegmenter.done pesq kenlm.done pyopenjtalk.done py3mmseg.done beamformit.done fairseq.done
+extra: warp-ctc.done warp-transducer.done nkf.done moses.done mwerSegmenter.done pesq kenlm.done pyopenjtalk.done py3mmseg.done beamformit.done
 endif
 
 
@@ -148,19 +148,19 @@ else
 			python3 -m pip install $(PIP_CHAINER) cupy==$(CHAINER_VERSION); \
 		fi
 endif
-	# chainer=6.0.0 depends on typing<=3.6.6, but this causes the following error when installing some modules. e.g. fairseq
-	# AttributeError: type object 'Callable' has no attribute '_abc_registry'
-	# "typing" modules is not required for python>=3.6, so uninstall here
-	python3 -m pip uninstall -y typing
 	touch chainer.done
 
 # NOTE(kamo): Add conda_packages.done if cmake is used
 warp-ctc.done: pytorch.done conda_packages.done
+ifeq ($(strip $(CPU_ONLY)),)
+	[ -n "${CUDA_HOME}" ] || { echo -e "Error: CUDA_HOME is not set.\n    $$ . ./setup_cuda_env.sh <cuda-root>"; exit 1; }
+endif
 	. ./activate_python.sh && ./installers/install_warp-ctc.sh
 	touch warp-ctc.done
 
 warp-transducer.done: pytorch.done conda_packages.done
 ifeq ($(strip $(CPU_ONLY)),)
+	[ -n "${CUDA_HOME}" ] || { echo -e "Error: CUDA_HOME is not set.\n    $$ . ./setup_cuda_env.sh <cuda-root>"; exit 1; }
 	. ./activate_python.sh && ./installers/install_warp-transducer.sh
 	. ./activate_python.sh &&  ./installers/install_warp-rnnt.sh $(CUDA_VERSION)
 	touch warp-transducer.done
@@ -207,10 +207,6 @@ py3mmseg.done: espnet.done
 beamformit.done:
 	./installers/install_beamformit.sh
 	touch beamformit.done
-
-fairseq.done: espnet.done
-	. ./activate_python.sh && ./installers/install_fairseq.sh
-	touch fairseq.done
 
 check_install: python
 	. ./activate_python.sh; . ./extra_path.sh; python3 check_install.py
