@@ -56,6 +56,8 @@ and also follows [Kaldi](http://kaldi-asr.org/) style data processing, feature e
   > Please refer to the [tutorial page](https://espnet.github.io/espnet/tutorial.html#transducer) for complete documentation.
 - CTC segmentation
 - Non-autoregressive based on Mask CTC
+- ASR examples for supporting endangered language documentation (Please refer to egs/puebla_nahuatl and egs/yoloxochitl_mixtec for details)
+- Wav2Vec2.0 pretrained model as Encoder, imported from [FairSeq](https://github.com/pytorch/fairseq/tree/master/fairseq).
 
 ### TTS: Text-to-speech
 - Tacotron2
