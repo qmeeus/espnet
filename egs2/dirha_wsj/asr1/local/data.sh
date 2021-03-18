@@ -1,5 +1,4 @@
-#!/bin/bash
-
+#!/usr/bin/env bash
 set -e
 set -u
 set -o pipefail
@@ -56,11 +55,11 @@ fi
 
 if [ ${stage} -le 0 ] && [ ${stop_stage} -ge 0 ]; then
     log "stage 0: Data preparation"
-    
+
     #expdir=exp/prepare_dirha_wsj_data_${mic}
     #$train_cmd $expdir/Data.log \
     #matlab -nodisplay -nosplash -r "addpath('./local/tools'); Data_Contamination('$mic','$WSJ0', '$WSJ1', '$dirha_folder', '$dirha_wsj_folder', '$IR_folder', '$sph_reader');exit"
-    
+
     # augmented train
     wsj0_contaminated_folder=WSJ0_contaminated_mic_$mic # path of the wsj0 training data
     wsj1_contaminated_folder=WSJ1_contaminated_mic_$mic # path of the wsj1 training data
