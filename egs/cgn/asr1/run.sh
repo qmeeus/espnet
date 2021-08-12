@@ -11,7 +11,7 @@ backend=pytorch
 stage=-1       # start from -1 if you need to start from data download
 stop_stage=100
 ngpu=8         # number of gpus ("0" uses cpu, otherwise use gpu)
-nj=32
+nj=8
 debugmode=1
 dumpdir=dump   # directory to dump full features
 N=0            # number of minibatches to be used (mainly for debugging). "0" uses all minibatches.
@@ -28,6 +28,7 @@ lm_config=conf/lm.yaml
 decode_config=conf/decode.yaml
 
 # rnnlm related
+skip_lm_training=true
 lm_resume= # specify a snapshot file to resume LM training
 lmtag=     # tag for managing LMs
 
@@ -36,7 +37,7 @@ recog_model=model.acc.best  # set a model to be used for decoding: 'model.acc.be
 lang_model=rnnlm.model.best # set a language model to be used for decoding
 
 # model average realted (only for transformer)
-n_average=5                  # the number of ASR models to be averaged
+n_average=30                 # the number of ASR models to be averaged
 use_valbest_average=true     # if true, the validation `n_average`-best ASR models will be averaged.
                              # if false, the last `n_average` ASR models will be averaged.
 lm_n_average=0               # the number of languge models to be averaged
@@ -69,8 +70,10 @@ set -o pipefail
 train_set=CGN_train
 train_sp=train_sp
 train_dev=CGN_valid
-# recog_set="test_clean test_other dev_clean dev_other"
-recog_set=CGN_test
+# recog_set="grabo patience"
+# recog_set="patience"
+# recog_set="a b e f g h i j k l m n o"
+recog_set="o"
 
 if [ ${stage} -le -1 ] && [ ${stop_stage} -ge -1 ]; then
     echo "stage -1: Data Download"
@@ -151,7 +154,8 @@ fi
 
 # dict=data/lang_char/${train_set}_${bpemode}${nbpe}_units.txt
 dict=data/lang_unigram/${train_set}_${bpemode}_${nbpe}_units.txt
-bpemodel=data/lang_char/${train_set}_${bpemode}${nbpe}
+# bpemodel=data/lang_char/${train_set}_${bpemode}${nbpe}
+bpemodel=data/lang_${bpemode}/${train_set}_${bpemode}_${nbpe}
 echo "dictionary: ${dict}"
 if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
     ### Task dependent. You have to check non-linguistic symbols used in the corpus.
@@ -213,6 +217,25 @@ if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
         --resume ${lm_resume} \
         --dict ${dict} \
         --dump-hdf5-path ${lmdatadir}
+
+    # Average LM models
+    if [ ${lm_n_average} -eq 0 ]; then
+        lang_model=rnnlm.model.best
+    else
+        if ${use_lm_valbest_average}; then
+            lang_model=rnnlm.val${lm_n_average}.avg.best
+            opt="--log ${lmexpdir}/log"
+        else
+            lang_model=rnnlm.last${lm_n_average}.avg.best
+            opt="--log"
+        fi
+        average_checkpoints.py \
+            ${opt} \
+            --backend ${backend} \
+            --snapshots ${lmexpdir}/snapshot.ep.* \
+            --out ${lmexpdir}/${lang_model} \
+            --num ${lm_n_average}
+    fi
 fi
 
 if [ -z ${tag} ]; then
@@ -247,14 +270,12 @@ if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
         --resume ${resume} \
         --train-json ${feat_sp_dir}/data_${bpemode}_${nbpe}.poly.json \
         --valid-json ${feat_dt_dir}/data_${bpemode}_${nbpe}.poly.json
-fi
 
-if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
-    echo "stage 5: Decoding"
     if [[ $(get_yaml.py ${train_config} model-module) = *transformer* ]] || \
            [[ $(get_yaml.py ${train_config} model-module) = *conformer* ]] || \
            [[ $(get_yaml.py ${train_config} etype) = transformer ]] || \
            [[ $(get_yaml.py ${train_config} dtype) = transformer ]]; then
+
         # Average ASR models
         if ${use_valbest_average}; then
             recog_model=model.val${n_average}.avg.best
@@ -270,37 +291,30 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
             --out ${expdir}/results/${recog_model} \
             --num ${n_average}
 
-        # Average LM models
-        if [ ${lm_n_average} -eq 0 ]; then
-            lang_model=rnnlm.model.best
-        else
-            if ${use_lm_valbest_average}; then
-                lang_model=rnnlm.val${lm_n_average}.avg.best
-                opt="--log ${lmexpdir}/log"
-            else
-                lang_model=rnnlm.last${lm_n_average}.avg.best
-                opt="--log"
-            fi
-            average_checkpoints.py \
-                ${opt} \
-                --backend ${backend} \
-                --snapshots ${lmexpdir}/snapshot.ep.* \
-                --out ${lmexpdir}/${lang_model} \
-                --num ${lm_n_average}
-        fi
     fi
+
+fi
+
+if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
+    echo "stage 5: Decoding"
 
     pids=() # initialize pids
     for rtask in ${recog_set}; do
     (
+        recog_model=model.val${n_average}.avg.best
         decode_dir=decode_${rtask}_${recog_model}_$(basename ${decode_config%.*})_${lmtag}
-        feat_recog_dir=${dumpdir}/${rtask}/delta${do_delta}
+        # feat_recog_dir=${dumpdir}/${rtask}/delta${do_delta}
+        feat_recog_dir=${dumpdir}/CGN_test/nopitch
+        # feat_recog_dir=${dumpdir}/grabo_patience/nopitch
+        json_prefix=data_${bpemode}_${nbpe}
+        # json_prefix=data
+        jsonfile=${json_prefix}.${rtask}.json
 
         # split data
-        splitjson.py --parts ${nj} ${feat_recog_dir}/data_${bpemode}${nbpe}.json
+        splitjson.py --parts ${nj} ${feat_recog_dir}/${jsonfile}
 
         #### use CPU for decoding
-        ngpu=0
+        ngpu=1
 
         # set batchsize 0 to disable batch decoding
         ${decode_cmd} JOB=1:${nj} ${expdir}/${decode_dir}/log/decode.JOB.log \
@@ -309,18 +323,17 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
             --ngpu ${ngpu} \
             --backend ${backend} \
             --batchsize 0 \
-            --recog-json ${feat_recog_dir}/split${nj}utt/data_${bpemode}${nbpe}.JOB.json \
+            --recog-json ${feat_recog_dir}/split${nj}utt/${json_prefix}.${rtask}.JOB.json \
             --result-label ${expdir}/${decode_dir}/data.JOB.json \
             --model ${expdir}/results/${recog_model}  \
-            --rnnlm ${lmexpdir}/${lang_model} \
             --api v2
 
         score_sclite.sh --bpe ${nbpe} --bpemodel ${bpemodel}.model --wer true ${expdir}/${decode_dir} ${dict}
 
-    ) &
-    pids+=($!) # store background pids
+    ) #&
+    # pids+=($!) # store background pids
     done
-    i=0; for pid in "${pids[@]}"; do wait ${pid} || ((++i)); done
-    [ ${i} -gt 0 ] && echo "$0: ${i} background jobs are failed." && false
+    # i=0; for pid in "${pids[@]}"; do wait ${pid} || ((++i)); done
+    # [ ${i} -gt 0 ] && echo "$0: ${i} background jobs are failed." && false
     echo "Finished"
 fi
