@@ -252,7 +252,7 @@ class Decoder(BatchScorerInterface, torch.nn.Module):
 
         if use_output_layer:
             self.output_layer = torch.nn.Linear(
-                attention_dim if teacher_adim is None else teacher_adim, 
+                attention_dim if teacher_adim is None else teacher_adim,
                 odim
             )
         else:

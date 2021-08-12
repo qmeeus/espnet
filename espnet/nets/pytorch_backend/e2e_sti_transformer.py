@@ -2,54 +2,43 @@
 #  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
 
 """Transformer speech recognition model (pytorch)."""
-
-from argparse import Namespace
-from itertools import groupby
+import chainer
 import logging
 import math
-
-import numpy
 import torch
+
+from chainer import reporter
+from itertools import groupby
+from operator import itemgetter
 from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils.rnn import pad_sequence
 
-from transformers import AutoModelForMaskedLM, AutoTokenizer, DataCollatorForLanguageModeling
+from transformers import (
+    AutoModelForMaskedLM, 
+    AutoTokenizer, 
+    DataCollatorForLanguageModeling,
+    DataCollatorForWholeWordMask,
+    default_data_collator
+)
 
-from espnet.nets.asr_interface import ASRInterface
-from espnet.nets.ctc_prefix_score import CTCPrefixScore
-from espnet.nets.e2e_asr_common import end_detect
-from espnet.nets.e2e_asr_common import ErrorCalculator
-from espnet.nets.pytorch_backend.ctc import CTC
 from espnet.nets.pytorch_backend.e2e_asr import CTC_LOSS_THRESHOLD
-from espnet.nets.pytorch_backend.e2e_asr import Reporter
-from espnet.nets.pytorch_backend.nets_utils import get_subsample
 from espnet.nets.pytorch_backend.nets_utils import make_non_pad_mask
 from espnet.nets.pytorch_backend.nets_utils import th_accuracy
-from espnet.nets.pytorch_backend.rnn.decoders import CTC_SCORING_RATIO
-from espnet.nets.pytorch_backend.transformer.add_sos_eos import add_sos_eos
-from espnet.nets.pytorch_backend.transformer.argument import (
-    add_arguments_transformer_common,  # noqa: H301
-)
-from espnet.nets.pytorch_backend.transformer.attention import (
-    MultiHeadedAttention,  # noqa: H301
-    RelPositionMultiHeadedAttention,  # noqa: H301
-)
-from espnet.nets.pytorch_backend.transformer.decoder import Decoder
-from espnet.nets.pytorch_backend.transformer.dynamic_conv import DynamicConvolution
-from espnet.nets.pytorch_backend.transformer.dynamic_conv2d import DynamicConvolution2D
-from espnet.nets.pytorch_backend.transformer.encoder import Encoder
-from espnet.nets.pytorch_backend.transformer.initializer import initialize
 from espnet.nets.pytorch_backend.transformer.label_smoothing_loss import (
     LabelSmoothingLoss,  # noqa: H301
 )
-from espnet.nets.pytorch_backend.transformer.mask import subsequent_mask
-from espnet.nets.pytorch_backend.transformer.mask import target_mask
-from espnet.nets.pytorch_backend.transformer.plot import PlotAttentionReport
-from espnet.nets.scorers.ctc import CTCPrefixScorer
-from espnet.utils.fill_missing_args import fill_missing_args
 from espnet.nets.pytorch_backend.e2e_asr_transformer import E2E as ASRTransformer
 from espnet.nets.pytorch_backend.losses import MaskedMSELoss
+
+
+class Reporter(chainer.Chain):
+    """A chainer reporter wrapper."""
+
+    def report(self, **kwargs):
+        for key, value in kwargs.items():
+            reporter.report({key: value}, self)
+
 
 class E2E(ASRTransformer):
     """E2E module.
@@ -89,6 +78,18 @@ class E2E(ASRTransformer):
             default=.7,
             type=float,
             help="The masking probability"
+        )
+        group.add_argument(
+            "--wwm",
+            default=False,
+            type=bool,
+            help="Mask whole words"
+        )
+        group.add_argument(
+            "--no-mask-teacher-inputs",
+            default=False,
+            type=bool,
+            help="Pass unmasked token to teacher rather than masked inputs."
         )
         group.add_argument(
             "--alpha_mse",
@@ -138,24 +139,29 @@ class E2E(ASRTransformer):
         args.report_cer = args.report_wer = False
         super(E2E, self).__init__(idim, odim, args, ignore_id=-1)
         self.teacher_model, self.teacher_tokenizer = self.load_teacher(args)
-        self.collator = DataCollatorForLanguageModeling(
+        Collator = DataCollatorForWholeWordMask if args.wwm else DataCollatorForLanguageModeling
+        self.collator = Collator(
             self.teacher_tokenizer, mlm_probability=args.mlm_probability)
         self.mask_token = self.teacher_tokenizer.mask_token_id
         self.vocabulary = args.char_list
+        self.alpha_mlm = args.alpha_mlm
         self.alpha_mse = args.alpha_mse
         self.alpha_ce = args.alpha_ce
         self.alpha_cos = args.alpha_cos
         self.restrict_ce_to_mask = args.restrict_ce_to_mask
+        self.mask_teacher_inputs = not(args.no_mask_teacher_inputs)
         
         self.temperature = args.temperature
         self.ce_loss_fct = nn.KLDivLoss(reduction="batchmean")
         self.mlm_loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
         if self.alpha_mse > 0:
-            self.mse_loss_fct = MaskedMSELoss(reduction="sum")
+            self.mse_loss_fct = nn.MSELoss(reduction="sum")
         if self.alpha_cos > 0:
-            self.cosine_loss_fct = nn.CosineEmbeddingLoss(reduction="mean")
+            self.cosine_loss_fct = nn.CosineEmbeddingLoss(reduction="sum")
 
         self.teacher_odim = args.teacher_odim
+
+        self.reporter = Reporter()
 
     def convert_tokens_to_string(self, tokens):
         if type(tokens[0]) == int:
@@ -197,6 +203,9 @@ class E2E(ASRTransformer):
         :return: accuracy in attention decoder
         :rtype: float
         """
+
+        bs = xs_pad.size(0)
+
         # 1. forward encoder
         xs_pad = xs_pad[:, : max(ilens)]  # for data parallel
         src_mask = make_non_pad_mask(ilens.tolist()).to(xs_pad.device).unsqueeze(-2)
@@ -209,16 +218,29 @@ class E2E(ASRTransformer):
         tokens = self.teacher_tokenizer(texts)["input_ids"]
         decoder_inputs = self.collator(list(map(torch.tensor, tokens)))
 
+        teacher_pad_token_id = self.teacher_tokenizer.pad_token_id
         ys_in_pad, ys_out_pad = decoder_inputs["input_ids"].to(device), decoder_inputs["labels"].to(device)
-        ys_mask = (ys_in_pad != self.teacher_tokenizer.pad_token_id)
+        ys_mask = (ys_in_pad != teacher_pad_token_id)
 
         with torch.no_grad():
+            teacher_inputs = (
+                ys_in_pad if self.mask_teacher_inputs 
+                else torch.nn.utils.rnn.pad_sequence(
+                    list(map(torch.tensor, tokens)), 
+                    padding_value=teacher_pad_token_id,
+                    batch_first=True
+                ).to(device)
+            )
+            teacher_mask = (teacher_inputs != teacher_pad_token_id)
             t_logits, t_hidden_states = self.teacher_model(
-                input_ids=ys_in_pad, 
-                attention_mask=ys_mask, 
-                output_hidden_states=True
+                input_ids=teacher_inputs, 
+                attention_mask=teacher_mask, 
+                output_hidden_states=True,
+                return_dict=False
             )
 
+            t_hidden_states = t_hidden_states[-1]
+        
         s_logits, pred_mask, s_hidden_states = self.decoder(
             ys_in_pad, ys_mask.unsqueeze(1), hs_pad, hs_mask, return_hidden=True
         )
@@ -236,7 +258,7 @@ class E2E(ASRTransformer):
 
         # 3. compute attention loss
         loss_label = self.mlm_loss_fct(s_logits.view(-1, self.teacher_odim), ys_out_pad.view(-1))
-        loss_att = loss_label
+        loss_att = loss_label * self.alpha_mlm
 
         loss_ce = (
             self.ce_loss_fct(
@@ -246,15 +268,11 @@ class E2E(ASRTransformer):
         )
 
         loss_att += loss_ce * self.alpha_ce
+        loss_mse, loss_cos = None, None
 
-        if self.alpha_mse > 0:
-            loss_mse = self.mse_loss(decoder_proj, teacher_out, ys_mask.sum(-1))
-            loss_att += loss_mse * self.alpha_mse
-
-        if self.alpha_cos > 0:
-            t_hidden_states = t_hidden_states[-1]
-            mask = ys_mask.unsqueeze(-1).expand_as(s_hidden_states)
+        if self.alpha_mse > 0 or self.alpha_cos > 0:
             assert s_hidden_states.size() == t_hidden_states.size()
+            mask = ys_mask.unsqueeze(-1).expand_as(s_hidden_states)
             dim = s_hidden_states.size(-1)
 
             s_hidden_states_slct = torch.masked_select(s_hidden_states, mask)  # (bs * seq_length * dim)
@@ -262,12 +280,19 @@ class E2E(ASRTransformer):
             t_hidden_states_slct = torch.masked_select(t_hidden_states, mask)  # (bs * seq_length * dim)
             t_hidden_states_slct = t_hidden_states_slct.view(-1, dim)  # (bs * seq_length, dim)
 
+        if self.alpha_mse > 0:
+            assert s_hidden_states.size() == t_hidden_states.size()
+            loss_mse = self.mse_loss_fct(s_hidden_states_slct, t_hidden_states_slct) / s_hidden_states_slct.size(0)
+            loss_att += loss_mse * self.alpha_mse
+
+        if self.alpha_cos > 0:
+
             target = s_hidden_states_slct.new(s_hidden_states_slct.size(0)).fill_(1)  # (bs * seq_length,)
-            loss_cos = self.cosine_loss_fct(s_hidden_states_slct, t_hidden_states_slct, target)
+            loss_cos = self.cosine_loss_fct(s_hidden_states_slct, t_hidden_states_slct, target) / bs
             loss_att += self.alpha_cos * loss_cos
 
         self.acc = th_accuracy(
-            s_logits.view(-1, self.teacher_odim), ys_out_pad, ignore_label=self.ignore_id
+            s_logits.view(-1, self.teacher_odim), ys_out_pad, ignore_label=-100
         )
 
         # TODO(karita) show predicted text
@@ -311,9 +336,120 @@ class E2E(ASRTransformer):
         loss_data = float(self.loss)
         if loss_data < CTC_LOSS_THRESHOLD and not math.isnan(loss_data):
             self.reporter.report(
-                loss_ctc_data, loss_att_data, self.acc, cer_ctc, cer, wer, loss_data
+                loss_ctc=loss_ctc_data,
+                loss_att=loss_att_data,
+                loss_mlm=float(loss_label),
+                loss_ce=float(loss_ce),
+                loss_mse=float(loss_mse) if loss_mse else None,
+                loss_cos=float(loss_cos) if loss_cos else None,
+                acc=self.acc, 
+                cer_ctc=cer_ctc,
+                cer=cer, wer=wer, 
+                loss=loss_data
             )
         else:
             logging.warning("loss (=%f) is not correct", loss_data)
 
         return self.loss
+
+
+    def encode(self, xs_pad, ilens, p_thres=.999, blank_multiplier=1):
+        _, _, s_hidden_states, output_lengths = self.predict(
+            xs_pad, ilens, p_thres=.999, blank_multiplier=blank_multiplier)
+        return s_hidden_states, output_lengths
+
+    def predict(self, xs_pad, ilens, K=10, p_thres=.99, blank_multiplier=1):
+        """E2E encode.
+
+        :param torch.Tensor xs_pad: batch of padded source sequences (B, Tmax, idim)
+        :param torch.Tensor ilens: batch of lengths of source sequences (B)
+        :return: encoded features
+        :rtype: torch.Tensor
+        :return: output_lengths
+        :rtype: torch.Tensor
+        """
+        # 1. forward encoder
+        xs_pad = xs_pad[:, : max(ilens)]  # for data parallel
+        src_mask = make_non_pad_mask(ilens.tolist()).to(xs_pad.device).unsqueeze(-2)
+        hs_pad, hs_mask = self.encoder(xs_pad, src_mask)
+        device = hs_pad.device
+
+        # 2. forward ctc
+        texts, ctc_preds = self._ctc_predict(hs_pad, p_thres, blank_multiplier)
+            
+        # 2. forward decoder
+        decoder_inputs = self.teacher_tokenizer(texts, return_tensors="pt", padding=True)
+
+        ys_in_pad = decoder_inputs["input_ids"].to(device)
+        attention_mask = decoder_inputs["attention_mask"].to(device)
+        if K > 0:
+            logits, pred_mask, hidden_states = self._dec_predict(ys_in_pad, attention_mask, hs_pad, hs_mask, p_thres=p_thres, K=K)
+        else:
+            logits, pred_mask, hidden_states = self.decoder(
+                ys_in_pad, attention_mask.unsqueeze(1), hs_pad, hs_mask, return_hidden=True
+            )
+
+        hidden_states.masked_fill_(~attention_mask.unsqueeze(-1).bool(), 0.)
+        return F.log_softmax(logits, dim=-1).detach(), ctc_preds, hidden_states.detach(), attention_mask.sum(-1).detach()
+
+    def _ctc_predict(self, hs_pad, p_thres, blank_multiplier):
+
+        batch_size = hs_pad.size(0)
+        ctc_probs = self.ctc.softmax(hs_pad, blank_multiplier)
+        ctc_probs, ctc_ids = ctc_probs.max(dim=-1)
+        
+        texts = []
+        ctc_preds = []
+        mask_token_id = self.vocabulary.index("<unk>")
+        for i in range(batch_size):
+            y_hat, probs_hat = map(torch.tensor, zip(
+                *map(lambda group: (group[0], max(map(itemgetter(1), group[1]))), groupby(
+                    zip(ctc_ids[i], ctc_probs[i]), key=lambda x: x[0]
+                ))
+            ))
+
+            y_idx = torch.nonzero(y_hat != 0).squeeze(-1)
+            mask_idx = torch.nonzero(probs_hat[y_idx] < p_thres).squeeze(-1)
+            confident_idx = torch.nonzero(probs_hat[y_idx] >= p_thres).squeeze(-1)            
+            seq = y_hat[y_idx].clone()
+            ctc_preds.append(y_hat[y_idx].clone().detach())
+            seq[mask_idx] = mask_token_id
+            texts.append("".join([
+                self.vocabulary[token_id] 
+                if token_id != mask_token_id else self.teacher_tokenizer.mask_token
+                for token_id in seq
+            ]).replace("▁", " "))
+
+        return texts, ctc_preds
+
+    def _dec_predict(self, ys_in_pad, attn_mask, hs_pad, hs_mask, K=10, p_thres=.99):
+        
+        mask_token_id = self.teacher_tokenizer.mask_token_id
+        logits, pred_mask, hidden_states = self.decoder(
+            ys_in_pad, attn_mask.unsqueeze(1), hs_pad, hs_mask, return_hidden=True
+        )
+        
+        ps = torch.softmax(logits, -1)
+
+        ys = torch.zeros_like(ys_in_pad)
+        for i in range(hs_pad.size(0)):
+            ps_, ys_ = ps[i].max(-1)
+            mask = (attn_mask[i] & (ps_ < p_thres)).bool()
+            K_ = min(K, mask.sum())
+            ys_[mask] = mask_token_id
+            indices = torch.arange(ys_.size(0))
+            for k in range(K_):
+                logits_, _ = self.decoder(
+                    ys_.unsqueeze(0), attn_mask[i:i+1], hs_pad[i:i+1], hs_mask[i:i+1]
+                )
+                new_ps_, new_ys_ = torch.softmax(logits_, -1).max(-1)
+                mask_ind = new_ps_[0, mask].argmax()
+                ys_[indices[mask][mask_ind]] = new_ys_[0, mask][mask_ind]
+                mask[indices[mask][mask_ind]] = False
+            ys[i] = ys_
+                
+        # Remaining masked tokens
+        logits, pred_mask, hidden_states = self.decoder(
+            ys, attn_mask.unsqueeze(1), hs_pad, hs_mask, return_hidden=True
+        )
+        return logits, pred_mask, hidden_states

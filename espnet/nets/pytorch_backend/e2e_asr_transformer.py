@@ -487,6 +487,16 @@ class E2E(ASRInterface, torch.nn.Module):
             "normalized log probability: "
             + str(nbest_hyps[0]["score"] / len(nbest_hyps[0]["yseq"]))
         )
+        if getattr(recog_args, "encode", False):
+            ypred = torch.tensor(nbest_hyps[0]["yseq"][:-1]).unsqueeze(0)
+            ymask = torch.ones_like(ypred).bool()
+            enc_mask =  torch.ones_like(enc_output[:, :, 0]).bool()
+            encoded = self.decoder.embed(ypred)
+            encoded, _, _, _ = self.decoder.decoders(
+                encoded, ymask, enc_output, enc_mask
+            )
+            return nbest_hyps, encoded.squeeze(0)
+
         return nbest_hyps
 
     def calculate_all_attentions(self, xs_pad, ilens, ys_pad):

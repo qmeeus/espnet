@@ -57,7 +57,7 @@ class CTC(torch.nn.Module):
             with torch.backends.cudnn.flags(deterministic=True):
                 loss = self.ctc_loss(th_pred, th_target, th_ilen, th_olen)
             # Batch-size average
-            loss = loss / th_pred.size(1)
+            loss = loss / th_pred.size(1) # FIXME: Error: this should be .size(0) to get batchmean
             return loss
         elif self.ctc_type == "warpctc":
             return self.ctc_loss(th_pred, th_target, th_ilen, th_olen)
@@ -122,14 +122,16 @@ class CTC(torch.nn.Module):
 
         return self.loss
 
-    def softmax(self, hs_pad):
+    def softmax(self, hs_pad, blank_multiplier=1):
         """softmax of frame activations
 
         :param torch.Tensor hs_pad: 3d tensor (B, Tmax, eprojs)
         :return: log softmax applied 3d tensor (B, Tmax, odim)
         :rtype: torch.Tensor
         """
-        self.probs = F.softmax(self.ctc_lo(hs_pad), dim=2)
+        logits = self.ctc_lo(hs_pad)
+        logits[:, :, 0] *= blank_multiplier
+        self.probs = F.softmax(logits, dim=2)
         return self.probs
 
     def log_softmax(self, hs_pad):

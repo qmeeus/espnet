@@ -1011,6 +1011,9 @@ def recog(args):
             score_norm=args.score_norm,
         )
 
+    if getattr(args, "encode", False) is True:
+        encoded = {}
+
     if args.batchsize == 0:
         with torch.no_grad():
             for idx, name in enumerate(js.keys(), 1):
@@ -1072,9 +1075,15 @@ def recog(args):
                     nbest_hyps = model.recognize(
                         feat, args, train_args.char_list, rnnlm
                     )
+                    if getattr(args, "encode", False) is True:
+                        nbest_hyps, _encoded = nbest_hyps
+                        encoded[name] = _encoded.numpy()
                 new_js[name] = add_results_to_json(
                     js[name], nbest_hyps, train_args.char_list
                 )
+
+            if getattr(args, "encode", False) is True:
+                np.savez(args.result_label.replace(".json", ".npz"), **encoded)
 
     else:
 

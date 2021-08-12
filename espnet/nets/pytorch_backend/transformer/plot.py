@@ -47,6 +47,7 @@ def _plot_and_save_attention(att_w, filename, xtokens=None, ytokens=None):
 def savefig(plot, filename):
     plot.savefig(filename)
     plt.clf()
+    plt.close(plot)
 
 
 def plot_multi_head_attention(
