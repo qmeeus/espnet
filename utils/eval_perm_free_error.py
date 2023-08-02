@@ -8,7 +8,6 @@ import codecs
 import json
 import logging
 import re
-import six
 import sys
 
 import numpy as np
@@ -178,14 +177,14 @@ def main():
     parser = get_parser()
     args = parser.parse_args()
 
-    if len(args.results) != args.num_spkrs ** 2:
+    if len(args.results) != args.num_spkrs**2:
         parser.print_help()
         sys.exit(1)
 
     # Read results from files
     results = {}
-    for r in six.moves.range(1, args.num_spkrs + 1):
-        for h in six.moves.range(1, args.num_spkrs + 1):
+    for r in range(1, args.num_spkrs + 1):
+        for h in range(1, args.num_spkrs + 1):
             idx = (r - 1) * args.num_spkrs + h - 1
             key = "r{}h{}".format(r, h)
 

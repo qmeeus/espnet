@@ -11,7 +11,7 @@
 stage=0       # start from 0 if you need to start from data preparation
 stop_stage=100
 SECONDS=0
-lang=en # en de fr cy tt kab ca zh-TW it fa eu es ru tr nl eo zh-CN rw pt zh-HK cs pl uk 
+lang=en # en de fr cy tt kab ca zh-TW it fa eu es ru tr nl eo zh-CN rw pt zh-HK cs pl uk
 
  . utils/parse_options.sh || exit 1;
 
@@ -24,7 +24,7 @@ log() {
     echo -e "$(date '+%Y-%m-%dT%H:%M:%S') (${fname}:${BASH_LINENO[0]}:${FUNCNAME[1]}) $*"
 }
 
-mkdir ${COMMONVOICE}
+mkdir -p ${COMMONVOICE}
 if [ -z "${COMMONVOICE}" ]; then
     log "Fill the value of 'COMMONVOICE' of db.sh"
     exit 1
@@ -42,9 +42,10 @@ test_set=test_"$(echo "${lang}" | tr - _)"
 
 log "data preparation started"
 
-if [ ${stage} -le 0 ] && [ ${stop_stage} -ge 0 ]; then 
+if [ ${stage} -le 0 ] && [ ${stop_stage} -ge 0 ]; then
     log "stage1: Download data to ${COMMONVOICE}"
-    mkdir -p ${COMMONVOICE}
+    log "The default data of this recipe is from commonvoice 5.1, for newer version, you need to register at \
+         https://commonvoice.mozilla.org/"
     local/download_and_untar.sh ${COMMONVOICE} ${data_url} ${lang}.tar.gz
 fi
 

@@ -3,11 +3,10 @@
 docker_gpu=0
 docker_egs=
 docker_folders=
-docker_cuda=10.1
+docker_tag=latest
 
 docker_env=
 docker_cmd=
-docker_os=u18
 
 is_root=false
 is_local=false
@@ -31,11 +30,11 @@ do
                         frombreak=false
                         shift
                         break 2
-                    fi 
-                done 
+                    fi
+                done
             done
             if ${frombreak} ; then
-                echo "bad option $1" 
+                echo "bad option $1"
                 exit 1
             fi
             ;;
@@ -48,11 +47,11 @@ do
                         eval ${ext}=true
                         frombreak=false
                         break 2
-                    fi 
-                done 
+                    fi
+                done
             done
             if ${frombreak} ; then
-                echo "bad option $1" 
+                echo "bad option $1"
                 exit 1
             fi
             ;;
@@ -69,25 +68,19 @@ fi
 
 from_tag="cpu"
 if [ ! "${docker_gpu}" == "-1" ]; then
-    if [ -z "${docker_cuda}" ]; then
-        # If the docker_cuda is not set, the program will automatically 
-        # search the installed version with default configurations (apt)
-        docker_cuda=$( nvcc -V | grep release )
-        docker_cuda=${docker_cuda#*"release "}
-        docker_cuda=${docker_cuda%,*}
-    fi
+    docker_cuda=$( nvcc -V | grep release )
+    docker_cuda=${docker_cuda#*"release "}
+    docker_cuda=${docker_cuda%,*}
+
     # After search for your cuda version, if the variable docker_cuda is empty the program will raise an error
     if [ -z "${docker_cuda}" ]; then
-        echo "CUDA was not found in your system. Use CPU image or install NVIDIA-DOCKER, CUDA and NVCC for GPU image."
+        echo "CUDA was not found in your system. Use CPU image or install NVIDIA-DOCKER, CUDA for GPU image."
         exit 1
-    else
-        from_tag="gpu-cuda${docker_cuda}-cudnn7"
     fi
+        from_tag="gpu"
 fi
 
-if [ ! -z "${docker_os}" ]; then
-    from_tag="${from_tag}-${docker_os}"
-fi
+from_tag="${from_tag}-${docker_tag}"
 
 EXTRAS=${is_extras}
 
@@ -115,7 +108,7 @@ fi
 if [ ${is_root} = false ]; then
     # Build a container with the user account
     container_tag="${from_tag}-user-${HOME##*/}"
-    docker_image=$( docker images -q espnet/espnet:${container_tag} ) 
+    docker_image=$( docker images -q espnet/espnet:${container_tag} )
     if ! [[ -n ${docker_image}  ]]; then
         echo "Building docker image..."
         build_args="--build-arg FROM_TAG=${from_tag}"
@@ -123,8 +116,8 @@ if [ ${is_root} = false ]; then
         build_args="${build_args} --build-arg THIS_UID=${UID}"
         build_args="${build_args} --build-arg EXTRA_LIBS=${EXTRAS}"
 
-        echo "Now running docker build ${build_args} -f prebuilt/Dockerfile -t espnet/espnet:${container_tag} ."
-        (docker build ${build_args} -f prebuilt/Dockerfile -t  espnet/espnet:${container_tag} .) || exit 1
+        echo "Now running docker build ${build_args} -f espnet.dockerfile -t espnet/espnet:${container_tag} ."
+        (docker build ${build_args} -f espnet.dockerfile -t  espnet/espnet:${container_tag} .) || exit 1
     fi
 else
     container_tag=${from_tag}
@@ -151,7 +144,7 @@ cd ..
 
 vols="-v ${PWD}/egs:/espnet/egs
       -v ${PWD}/espnet:/espnet/espnet
-      -v ${PWD}/test:/espnet/test 
+      -v ${PWD}/test:/espnet/test
       -v ${PWD}/utils:/espnet/utils"
 
 in_egs=egs
@@ -188,7 +181,7 @@ if [ ! -z "${docker_env}" ]; then
     docker_env=$(echo ${docker_env} | tr "," "\n")
     for i in ${docker_env[@]}
     do
-        this_env="-e $i ${this_env}" 
+        this_env="-e $i ${this_env}"
     done
 fi
 

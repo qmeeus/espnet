@@ -1,6 +1,7 @@
-from typing import Any
-from typing import Sequence
-from typing import Union
+import itertools
+import random
+from functools import partial
+from typing import Any, Sequence, Union
 
 import numpy as np
 from torch.utils.data import DataLoader
@@ -8,6 +9,13 @@ from typeguard import check_argument_types
 
 from espnet2.iterators.abs_iter_factory import AbsIterFactory
 from espnet2.samplers.abs_sampler import AbsSampler
+
+
+def worker_init_fn(worker_id, base_seed=0):
+    """Set random seed for each worker in DataLoader."""
+    seed = base_seed + worker_id
+    random.seed(seed)
+    np.random.seed(seed)
 
 
 class RawSampler(AbsSampler):
@@ -42,6 +50,7 @@ class SequenceIterFactory(AbsIterFactory):
         num_iters_per_epoch: int = None,
         seed: int = 0,
         shuffle: bool = False,
+        shuffle_within_batch: bool = False,
         num_workers: int = 0,
         collate_fn=None,
         pin_memory: bool = False,
@@ -56,6 +65,7 @@ class SequenceIterFactory(AbsIterFactory):
         self.dataset = dataset
         self.num_iters_per_epoch = num_iters_per_epoch
         self.shuffle = shuffle
+        self.shuffle_within_batch = shuffle_within_batch
         self.seed = seed
         self.num_workers = num_workers
         self.collate_fn = collate_fn
@@ -106,7 +116,6 @@ class SequenceIterFactory(AbsIterFactory):
                 if shuffle:
                     np.random.RandomState(_epoch + self.seed).shuffle(current_batches)
                 while _remain > 0:
-
                     _batches = current_batches[_cursor : _cursor + _remain]
                     batches += _batches
                     if _cursor + _remain >= N:
@@ -134,10 +143,23 @@ class SequenceIterFactory(AbsIterFactory):
         else:
             kwargs = {}
 
+        # reshuffle whole 'batches' so that elements within a batch can move
+        # between different batches
+        if self.shuffle_within_batch:
+            _bs = len(batches[0])
+            batches = list(itertools.chain(*batches))
+            np.random.RandomState(epoch + self.seed).shuffle(batches)
+            _batches = []
+            for ii in range(0, len(batches), _bs):
+                _batches.append(batches[ii : ii + _bs])
+            batches = _batches
+            del _batches
+
         return DataLoader(
             dataset=self.dataset,
             batch_sampler=batches,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
+            worker_init_fn=partial(worker_init_fn, base_seed=epoch + self.seed),
             **kwargs,
         )

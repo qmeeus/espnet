@@ -4,18 +4,17 @@
 """Encoder definition."""
 import contextlib
 import copy
-from filelock import FileLock
 import logging
 import os
-from typing import Optional
-from typing import Tuple
+from typing import Optional, Tuple
 
 import torch
+from filelock import FileLock
 from typeguard import check_argument_types
 
+from espnet2.asr.encoder.abs_encoder import AbsEncoder
 from espnet.nets.pytorch_backend.nets_utils import make_pad_mask
 from espnet.nets.pytorch_backend.transformer.layer_norm import LayerNorm
-from espnet2.asr.encoder.abs_encoder import AbsEncoder
 
 
 class FairSeqWav2Vec2Encoder(AbsEncoder):
@@ -124,13 +123,17 @@ class FairSeqWav2Vec2Encoder(AbsEncoder):
             enc_outputs = self.encoders(
                 xs_pad,
                 masks,
+                mask=self.training,
                 features_only=True,
             )
 
         xs_pad = enc_outputs["x"]  # (B,T,C),
-        masks = enc_outputs["padding_mask"]  # (B, T)
-
-        olens = (~masks).sum(dim=1)
+        bs = xs_pad.shape[0]
+        if enc_outputs["padding_mask"] is not None:
+            masks = enc_outputs["padding_mask"]  # (B, T)
+            olens = (~masks).sum(dim=1)  # (B)
+        else:
+            olens = torch.IntTensor([xs_pad.shape[1]]).repeat(bs).to(xs_pad.device)
 
         if self.output_layer is not None:
             xs_pad = self.output_layer(xs_pad)

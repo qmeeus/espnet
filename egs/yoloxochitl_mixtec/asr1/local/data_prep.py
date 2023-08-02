@@ -1,12 +1,14 @@
 # -*- coding: UTF-8 -*-
 
-from argparse import ArgumentParser
 import os
 import re
 import shutil
 import string
 import sys
+from argparse import ArgumentParser
 from xml.dom.minidom import parse
+
+import soundfile as sf
 
 s = "".join(chr(c) for c in range(sys.maxunicode + 1))
 ws = "".join(re.findall(r"\s", s))
@@ -38,7 +40,6 @@ def ExtractAudioID(audioname, wav_spk_info=None):
 
 
 def XMLRefine(input_xml, output_xml, readable=False):
-
     if readable:
         append = "\n"
     else:
@@ -413,6 +414,8 @@ def TraverseData(
                 continue
             left_channel_segments, right_channel_segments = segment_info
 
+            f = sf.SoundFile(sound_files[afile])
+            max_length = len(f) / f.samplerate
             print(
                 'sox -t wavpcm "%s" -c 1 -r 16000 -t wavpcm %s-L.wav remix 1'
                 % (sound_files[afile], os.path.join(new_data_dir, afile)),
@@ -431,6 +434,8 @@ def TraverseData(
                     afile,
                     PackZero(segment_number),
                 )
+                if float(segment[1]) > max_length:
+                    continue
                 print(
                     "%s %s-L %s %s" % (segment_id, afile, segment[0], segment[1]),
                     file=segments,
@@ -459,6 +464,8 @@ def TraverseData(
                         afile,
                         PackZero(segment_number),
                     )
+                    if float(segment[1]) > max_length:
+                        continue
                     print(
                         "%s %s-R %s %s" % (segment_id, afile, segment[0], segment[1]),
                         file=segments,

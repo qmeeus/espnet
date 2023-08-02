@@ -61,7 +61,7 @@ def pad_list(xs, pad_value):
     return pad
 
 
-def make_pad_mask(lengths, xs=None, length_dim=-1):
+def make_pad_mask(lengths, xs=None, length_dim=-1, maxlen=None):
     """Make mask tensor containing indices of padded part.
 
     Args:
@@ -80,7 +80,7 @@ def make_pad_mask(lengths, xs=None, length_dim=-1):
         With only lengths.
 
         >>> lengths = [5, 3, 2]
-        >>> make_non_pad_mask(lengths)
+        >>> make_pad_mask(lengths)
         masks = [[0, 0, 0, 0 ,0],
                  [0, 0, 0, 1, 1],
                  [0, 0, 1, 1, 1]]
@@ -150,13 +150,41 @@ def make_pad_mask(lengths, xs=None, length_dim=-1):
     if length_dim == 0:
         raise ValueError("length_dim cannot be 0: {}".format(length_dim))
 
-    if not isinstance(lengths, list):
-        lengths = lengths.tolist()
-    bs = int(len(lengths))
-    if xs is None:
-        maxlen = int(max(lengths))
+    # If the input dimension is 2 or 3,
+    # then we use ESPnet-ONNX based implementation for tracable modeling.
+    # otherwise we use the traditional implementation for research use.
+    if isinstance(lengths, list):
+        logging.warn(
+            "Using make_pad_mask with a list of lengths is not tracable. "
+            + "If you try to trace this function with type(lengths) == list, "
+            + "please change the type of lengths to torch.LongTensor."
+        )
+
+    if (
+        (xs is None or xs.dim() in (2, 3))
+        and length_dim <= 2
+        and (not isinstance(lengths, list) and lengths.dim() == 1)
+    ):
+        return _make_pad_mask_traceable(lengths, xs, length_dim, maxlen)
     else:
-        maxlen = xs.size(length_dim)
+        return _make_pad_mask(lengths, xs, length_dim, maxlen)
+
+
+def _make_pad_mask(lengths, xs=None, length_dim=-1, maxlen=None):
+    if not isinstance(lengths, list):
+        lengths = lengths.long().tolist()
+
+    bs = int(len(lengths))
+    if maxlen is None:
+        if xs is None:
+            maxlen = int(max(lengths))
+        else:
+            maxlen = xs.size(length_dim)
+    else:
+        assert xs is None, "When maxlen is specified, xs must not be specified."
+        assert maxlen >= int(
+            max(lengths)
+        ), f"maxlen {maxlen} must be >= max(lengths) {max(lengths)}"
 
     seq_range = torch.arange(0, maxlen, dtype=torch.int64)
     seq_range_expand = seq_range.unsqueeze(0).expand(bs, maxlen)
@@ -164,7 +192,9 @@ def make_pad_mask(lengths, xs=None, length_dim=-1):
     mask = seq_range_expand >= seq_length_expand
 
     if xs is not None:
-        assert xs.size(0) == bs, (xs.size(0), bs)
+        assert (
+            xs.size(0) == bs
+        ), f"The size of x.size(0) {xs.size(0)} must match the batch size {bs}"
 
         if length_dim < 0:
             length_dim = xs.dim() + length_dim
@@ -174,6 +204,61 @@ def make_pad_mask(lengths, xs=None, length_dim=-1):
         )
         mask = mask[ind].expand_as(xs).to(xs.device)
     return mask
+
+
+def _make_pad_mask_traceable(lengths, xs, length_dim, maxlen=None):
+    """
+    Make mask tensor containing indices of padded part.
+    This is a simplified implementation of make_pad_mask without the xs input
+    that supports JIT tracing for applications like exporting models to ONNX.
+    Dimension length of xs should be 2 or 3
+    This function will create torch.ones(maxlen, maxlen).triu(diagonal=1) and
+    select rows to create mask tensor.
+    """
+
+    if xs is None:
+        device = lengths.device
+    else:
+        device = xs.device
+
+    if xs is not None and len(xs.shape) == 3:
+        if length_dim == 1:
+            lengths = lengths.unsqueeze(1).expand(*xs.transpose(1, 2).shape[:2])
+        else:
+            # Then length_dim is 2 or -1.
+            if length_dim not in (-1, 2):
+                logging.warn(
+                    f"Invalid length_dim {length_dim}."
+                    + "We set it to -1, which is the default value."
+                )
+                length_dim = -1
+            lengths = lengths.unsqueeze(1).expand(*xs.shape[:2])
+
+    if maxlen is not None:
+        assert xs is None
+        assert maxlen >= lengths.max()
+    elif xs is not None:
+        maxlen = xs.shape[length_dim]
+    else:
+        maxlen = lengths.max()
+
+    # clip max(length) to maxlen
+    lengths = torch.clamp(lengths, max=maxlen).type(torch.long)
+
+    mask = torch.ones(maxlen + 1, maxlen + 1, dtype=torch.bool, device=device)
+    mask = triu_onnx(mask)[1:, :-1]  # onnx cannot handle diagonal argument.
+    mask = mask[lengths - 1][..., :maxlen]
+
+    if xs is not None and len(xs.shape) == 3 and length_dim == 1:
+        return mask.transpose(1, 2)
+    else:
+        return mask
+
+
+def triu_onnx(x):
+    arange = torch.arange(x.size(0), device=x.device)
+    mask = arange.unsqueeze(-1).expand(-1, x.size(0)) <= arange
+    return x * mask
 
 
 def make_non_pad_mask(lengths, xs=None, length_dim=-1):
@@ -403,7 +488,7 @@ def get_subsample(train_args, mode, arch):
 
     elif mode == "mt" and arch == "rnn":
         # +1 means input (+1) and layers outputs (train_args.elayer)
-        subsample = np.ones(train_args.elayers + 1, dtype=np.int)
+        subsample = np.ones(train_args.elayers + 1, dtype=np.int64)
         logging.warning("Subsampling is not performed for machine translation.")
         logging.info("subsample: " + " ".join([str(x) for x in subsample]))
         return subsample
@@ -413,7 +498,7 @@ def get_subsample(train_args, mode, arch):
         or (mode == "mt" and arch == "rnn")
         or (mode == "st" and arch == "rnn")
     ):
-        subsample = np.ones(train_args.elayers + 1, dtype=np.int)
+        subsample = np.ones(train_args.elayers + 1, dtype=np.int64)
         if train_args.etype.endswith("p") and not train_args.etype.startswith("vgg"):
             ss = train_args.subsample.split("_")
             for j in range(min(train_args.elayers + 1, len(ss))):
@@ -428,7 +513,7 @@ def get_subsample(train_args, mode, arch):
 
     elif mode == "asr" and arch == "rnn_mix":
         subsample = np.ones(
-            train_args.elayers_sd + train_args.elayers + 1, dtype=np.int
+            train_args.elayers_sd + train_args.elayers + 1, dtype=np.int64
         )
         if train_args.etype.endswith("p") and not train_args.etype.startswith("vgg"):
             ss = train_args.subsample.split("_")
@@ -447,7 +532,7 @@ def get_subsample(train_args, mode, arch):
     elif mode == "asr" and arch == "rnn_mulenc":
         subsample_list = []
         for idx in range(train_args.num_encs):
-            subsample = np.ones(train_args.elayers[idx] + 1, dtype=np.int)
+            subsample = np.ones(train_args.elayers[idx] + 1, dtype=np.int64)
             if train_args.etype[idx].endswith("p") and not train_args.etype[
                 idx
             ].startswith("vgg"):

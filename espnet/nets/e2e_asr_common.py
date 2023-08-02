@@ -9,11 +9,9 @@
 import json
 import logging
 import sys
-
-import editdistance
 from itertools import groupby
+
 import numpy as np
-import six
 
 
 def end_detect(ended_hyps, i, M=3, D_end=np.log(1 * np.exp(-10))):
@@ -32,7 +30,7 @@ def end_detect(ended_hyps, i, M=3, D_end=np.log(1 * np.exp(-10))):
         return False
     count = 0
     best_hyp = sorted(ended_hyps, key=lambda x: x["score"], reverse=True)[0]
-    for m in six.moves.range(M):
+    for m in range(M):
         # get ended_hyps with their length is i - m
         hyp_length = i - m
         hyps_same_length = [x for x in ended_hyps if len(x["yseq"]) == hyp_length]
@@ -121,7 +119,12 @@ class ErrorCalculator(object):
         self.char_list = char_list
         self.space = sym_space
         self.blank = sym_blank
-        self.idx_blank = self.char_list.index(self.blank)
+        # NOTE (Shih-Lun): else case is for OpenAI Whisper ASR model,
+        #                  which doesn't use <blank> token
+        if self.blank in self.char_list:
+            self.idx_blank = self.char_list.index(self.blank)
+        else:
+            self.idx_blank = None
         if self.space in self.char_list:
             self.idx_space = self.char_list.index(self.space)
         else:
@@ -160,6 +163,8 @@ class ErrorCalculator(object):
         :return: average sentence-level CER score
         :rtype float
         """
+        import editdistance
+
         cers, char_ref_lens = [], []
         for i, y in enumerate(ys_hat):
             y_hat = [x[0] for x in groupby(y)]
@@ -217,6 +222,8 @@ class ErrorCalculator(object):
         :return: average sentence-level CER score
         :rtype float
         """
+        import editdistance
+
         char_eds, char_ref_lens = [], []
         for i, seq_hat_text in enumerate(seqs_hat):
             seq_true_text = seqs_true[i]
@@ -234,6 +241,8 @@ class ErrorCalculator(object):
         :return: average sentence-level WER score
         :rtype float
         """
+        import editdistance
+
         word_eds, word_ref_lens = [], []
         for i, seq_hat_text in enumerate(seqs_hat):
             seq_true_text = seqs_true[i]

@@ -42,7 +42,6 @@ def main(args):
 
 
 def convert(jsonf, dic, refs, hyps, srcs, dic_src):
-
     # logging info
     logfmt = "%(asctime)s (%(module)s:%(lineno)d) %(levelname)s: %(message)s"
     logging.basicConfig(level=logging.INFO, format=logfmt)
@@ -78,20 +77,15 @@ def convert(jsonf, dic, refs, hyps, srcs, dic_src):
     for x in j["utts"]:
         # hyps
         if hyps:
-            seq = [
-                char_list_tgt[int(i)]
-                for i in j["utts"][x]["output"][0]["rec_tokenid"].split()
-            ]
-            hyp_file.write(" ".join(seq).replace("<eos>", "")),
+            hyp_file.write(j["utts"][x]["output"][0]["rec_text"].replace("<eos>", "")),
+
             hyp_file.write(
                 " (" + j["utts"][x]["utt2spk"].replace("-", "_") + "-" + x + ")\n"
             )
 
         # ref
-        seq = [
-            char_list_tgt[int(i)] for i in j["utts"][x]["output"][0]["tokenid"].split()
-        ]
-        ref_file.write(" ".join(seq).replace("<eos>", "")),
+        ref_file.write(j["utts"][x]["output"][0]["text"]),
+
         ref_file.write(
             " (" + j["utts"][x]["utt2spk"].replace("-", "_") + "-" + x + ")\n"
         )

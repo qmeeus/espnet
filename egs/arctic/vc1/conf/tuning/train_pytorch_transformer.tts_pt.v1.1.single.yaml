@@ -22,7 +22,7 @@ use-masking: True
 bce-pos-weight: 5.0
 use-batch-norm: True
 use-scaled-pos-enc: True
-encoder-normalize-before: False
+encoder-normalize-before: True
 decoder-normalize-before: False
 encoder-concat-after: False
 decoder-concat-after: False
@@ -32,7 +32,7 @@ transformer-input-layer: conv2d-scaled-pos-enc
 
 # minibatch related
 batch-sort-key: input # shuffle or input or output
-batch-bins: 3340800 
+batch-bins: 3340800
 
 # training related
 transformer-init: pytorch

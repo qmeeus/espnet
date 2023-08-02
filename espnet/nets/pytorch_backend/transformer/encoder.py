@@ -4,6 +4,7 @@
 """Encoder definition."""
 
 import logging
+
 import torch
 
 from espnet.nets.pytorch_backend.nets_utils import rename_state_dict
@@ -16,15 +17,19 @@ from espnet.nets.pytorch_backend.transformer.encoder_layer import EncoderLayer
 from espnet.nets.pytorch_backend.transformer.layer_norm import LayerNorm
 from espnet.nets.pytorch_backend.transformer.lightconv import LightweightConvolution
 from espnet.nets.pytorch_backend.transformer.lightconv2d import LightweightConvolution2D
-from espnet.nets.pytorch_backend.transformer.multi_layer_conv import Conv1dLinear
-from espnet.nets.pytorch_backend.transformer.multi_layer_conv import MultiLayeredConv1d
+from espnet.nets.pytorch_backend.transformer.multi_layer_conv import (
+    Conv1dLinear,
+    MultiLayeredConv1d,
+)
 from espnet.nets.pytorch_backend.transformer.positionwise_feed_forward import (
-    PositionwiseFeedForward,  # noqa: H301
+    PositionwiseFeedForward,
 )
 from espnet.nets.pytorch_backend.transformer.repeat import repeat
-from espnet.nets.pytorch_backend.transformer.subsampling import Conv2dSubsampling
-from espnet.nets.pytorch_backend.transformer.subsampling import Conv2dSubsampling6
-from espnet.nets.pytorch_backend.transformer.subsampling import Conv2dSubsampling8
+from espnet.nets.pytorch_backend.transformer.subsampling import (
+    Conv2dSubsampling,
+    Conv2dSubsampling6,
+    Conv2dSubsampling8,
+)
 
 
 def _pre_hook(
@@ -47,15 +52,15 @@ class Encoder(torch.nn.Module):
 
     Args:
         idim (int): Input dimension.
-        attention_dim (int): Dimention of attention.
+        attention_dim (int): Dimension of attention.
         attention_heads (int): The number of heads of multi head attention.
         conv_wshare (int): The number of kernel of convolution. Only used in
-            self_attention_layer_type == "lightconv*" or "dynamiconv*".
+            selfattention_layer_type == "lightconv*" or "dynamiconv*".
         conv_kernel_length (Union[int, str]): Kernel size str of convolution
-            (e.g. 71_71_71_71_71_71). Only used in self_attention_layer_type
+            (e.g. 71_71_71_71_71_71). Only used in selfattention_layer_type
             == "lightconv*" or "dynamiconv*".
         conv_usebias (bool): Whether to use bias in convolution. Only used in
-            self_attention_layer_type == "lightconv*" or "dynamiconv*".
+            selfattention_layer_type == "lightconv*" or "dynamiconv*".
         linear_units (int): The number of units of position-wise feed forward.
         num_blocks (int): The number of decoder blocks.
         dropout_rate (float): Dropout rate.
@@ -73,6 +78,11 @@ class Encoder(torch.nn.Module):
         positionwise_conv_kernel_size (int): Kernel size of positionwise conv1d layer.
         selfattention_layer_type (str): Encoder attention layer type.
         padding_idx (int): Padding idx for input_layer=embed.
+        stochastic_depth_rate (float): Maximum probability to skip the encoder layer.
+        intermediate_layers (Union[List[int], None]): indices of intermediate CTC layer.
+            indices start from 1.
+            if not None, intermediate outputs are returned (which changes return type
+            signature.)
 
     """
 
@@ -97,6 +107,10 @@ class Encoder(torch.nn.Module):
         positionwise_conv_kernel_size=1,
         selfattention_layer_type="selfattn",
         padding_idx=-1,
+        stochastic_depth_rate=0.0,
+        intermediate_layers=None,
+        ctc_softmax=None,
+        conditioning_layer_dim=None,
     ):
         """Construct an Encoder object."""
         super(Encoder, self).__init__()
@@ -186,7 +200,7 @@ class Encoder(torch.nn.Module):
         elif selfattention_layer_type == "lightconv2d":
             logging.info(
                 "encoder self-attention layer "
-                "type = lightweight convolution 2-dimentional"
+                "type = lightweight convolution 2-dimensional"
             )
             encoder_selfattn_layer = LightweightConvolution2D
             encoder_selfattn_layer_args = [
@@ -216,7 +230,7 @@ class Encoder(torch.nn.Module):
             ]
         elif selfattention_layer_type == "dynamicconv2d":
             logging.info(
-                "encoder self-attention layer type = dynamic convolution 2-dimentional"
+                "encoder self-attention layer type = dynamic convolution 2-dimensional"
             )
             encoder_selfattn_layer = DynamicConvolution2D
             encoder_selfattn_layer_args = [
@@ -242,10 +256,19 @@ class Encoder(torch.nn.Module):
                 dropout_rate,
                 normalize_before,
                 concat_after,
+                stochastic_depth_rate * float(1 + lnum) / num_blocks,
             ),
         )
         if self.normalize_before:
             self.after_norm = LayerNorm(attention_dim)
+
+        self.intermediate_layers = intermediate_layers
+        self.use_conditioning = True if ctc_softmax is not None else False
+        if self.use_conditioning:
+            self.ctc_softmax = ctc_softmax
+            self.conditioning_layer = torch.nn.Linear(
+                conditioning_layer_dim, attention_dim
+            )
 
     def get_positionwise_layer(
         self,
@@ -284,11 +307,11 @@ class Encoder(torch.nn.Module):
 
         Args:
             xs (torch.Tensor): Input tensor (#batch, time, idim).
-            masks (torch.Tensor): Mask tensor (#batch, time).
+            masks (torch.Tensor): Mask tensor (#batch, 1, time).
 
         Returns:
             torch.Tensor: Output tensor (#batch, time, attention_dim).
-            torch.Tensor: Mask tensor (#batch, time).
+            torch.Tensor: Mask tensor (#batch, 1, time).
 
         """
         if isinstance(
@@ -298,9 +321,33 @@ class Encoder(torch.nn.Module):
             xs, masks = self.embed(xs, masks)
         else:
             xs = self.embed(xs)
-        xs, masks = self.encoders(xs, masks)
+
+        if self.intermediate_layers is None:
+            xs, masks = self.encoders(xs, masks)
+        else:
+            intermediate_outputs = []
+            for layer_idx, encoder_layer in enumerate(self.encoders):
+                xs, masks = encoder_layer(xs, masks)
+
+                if (
+                    self.intermediate_layers is not None
+                    and layer_idx + 1 in self.intermediate_layers
+                ):
+                    encoder_output = xs
+                    # intermediate branches also require normalization.
+                    if self.normalize_before:
+                        encoder_output = self.after_norm(encoder_output)
+                    intermediate_outputs.append(encoder_output)
+
+                    if self.use_conditioning:
+                        intermediate_result = self.ctc_softmax(encoder_output)
+                        xs = xs + self.conditioning_layer(intermediate_result)
+
         if self.normalize_before:
             xs = self.after_norm(xs)
+
+        if self.intermediate_layers is not None:
+            return xs, masks, intermediate_outputs
         return xs, masks
 
     def forward_one_step(self, xs, masks, cache=None):

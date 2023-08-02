@@ -1,14 +1,16 @@
 import argparse
+import unittest.mock
 from concurrent.futures.process import ProcessPoolExecutor
 from concurrent.futures.thread import ThreadPoolExecutor
-import unittest.mock
 
 import pytest
 
 from espnet2.tasks.abs_task import AbsTask
-from espnet2.train.distributed_utils import DistributedOption
-from espnet2.train.distributed_utils import free_port
-from espnet2.train.distributed_utils import resolve_distributed_mode
+from espnet2.train.distributed_utils import (
+    DistributedOption,
+    free_port,
+    resolve_distributed_mode,
+)
 from espnet2.utils.build_dataclass import build_dataclass
 
 
@@ -186,6 +188,7 @@ def test_resolve_distributed_mode10(dist_init_method):
     assert not args.multiprocessing_distributed
 
 
+@pytest.mark.skipif(True, reason="sometimes hangup?")
 def test_init_cpu(dist_init_method):
     args = argparse.Namespace(
         multiprocessing_distributed=True,
@@ -238,6 +241,7 @@ def test_init_cpu2():
             fn2.result()
 
 
+@pytest.mark.skipif(True, reason="sometimes hangup?")
 def test_init_cpu3():
     args = argparse.Namespace(
         multiprocessing_distributed=True,

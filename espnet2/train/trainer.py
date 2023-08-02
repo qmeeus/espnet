@@ -1,58 +1,53 @@
+"""Trainer module."""
 import argparse
-from contextlib import contextmanager
 import dataclasses
-from dataclasses import is_dataclass
-from distutils.version import LooseVersion
 import logging
-from pathlib import Path
 import time
-from typing import Dict
-from typing import Iterable
-from typing import List
-from typing import Optional
-from typing import Sequence
-from typing import Tuple
-from typing import Union
+from contextlib import contextmanager
+from dataclasses import is_dataclass
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import humanfriendly
 import numpy as np
 import torch
 import torch.nn
 import torch.optim
+from packaging.version import parse as V
 from typeguard import check_argument_types
 
 from espnet2.iterators.abs_iter_factory import AbsIterFactory
 from espnet2.main_funcs.average_nbest_models import average_nbest_models
 from espnet2.main_funcs.calculate_all_attentions import calculate_all_attentions
-from espnet2.schedulers.abs_scheduler import AbsBatchStepScheduler
-from espnet2.schedulers.abs_scheduler import AbsEpochStepScheduler
-from espnet2.schedulers.abs_scheduler import AbsScheduler
-from espnet2.schedulers.abs_scheduler import AbsValEpochStepScheduler
+from espnet2.schedulers.abs_scheduler import (
+    AbsBatchStepScheduler,
+    AbsEpochStepScheduler,
+    AbsScheduler,
+    AbsValEpochStepScheduler,
+)
 from espnet2.torch_utils.add_gradient_noise import add_gradient_noise
 from espnet2.torch_utils.device_funcs import to_device
 from espnet2.torch_utils.recursive_op import recursive_average
 from espnet2.torch_utils.set_all_random_seed import set_all_random_seed
 from espnet2.train.abs_espnet_model import AbsESPnetModel
 from espnet2.train.distributed_utils import DistributedOption
-from espnet2.train.reporter import Reporter
-from espnet2.train.reporter import SubReporter
+from espnet2.train.reporter import Reporter, SubReporter
 from espnet2.utils.build_dataclass import build_dataclass
+from espnet2.utils.kwargs2args import kwargs2args
 
-if LooseVersion(torch.__version__) >= LooseVersion("1.1.0"):
-    from torch.utils.tensorboard import SummaryWriter
-else:
-    from tensorboardX import SummaryWriter
 if torch.distributed.is_available():
-    if LooseVersion(torch.__version__) > LooseVersion("1.0.1"):
-        from torch.distributed import ReduceOp
-    else:
-        from torch.distributed import reduce_op as ReduceOp
-else:
-    ReduceOp = None
+    from torch.distributed import ReduceOp
 
-if LooseVersion(torch.__version__) >= LooseVersion("1.6.0"):
-    from torch.cuda.amp import autocast
-    from torch.cuda.amp import GradScaler
+autocast_args = dict()
+if V(torch.__version__) >= V("1.6.0"):
+    from torch.cuda.amp import GradScaler, autocast
+
+    if (
+        V(torch.__version__) >= V("1.10.0")
+        and torch.cuda.is_available()
+        and torch.cuda.is_bf16_supported()
+    ):
+        autocast_args = dict(dtype=torch.bfloat16)
 else:
     # Nothing to do if torch<1.6.0
     @contextmanager
@@ -79,6 +74,7 @@ class TrainerOptions:
     grad_clip_type: float
     log_interval: Optional[int]
     no_forward_run: bool
+    use_matplotlib: bool
     use_tensorboard: bool
     use_wandb: bool
     output_dir: Union[Path, str]
@@ -87,10 +83,13 @@ class TrainerOptions:
     sharded_ddp: bool
     patience: Optional[int]
     keep_nbest_models: Union[int, List[int]]
+    nbest_averaging_interval: int
     early_stopping_criterion: Sequence[str]
     best_model_criterion: Sequence[Sequence[str]]
     val_scheduler_criterion: Sequence[str]
     unused_parameters: bool
+    wandb_model_log_interval: int
+    create_graph_in_tensorboard: bool
 
 
 class Trainer:
@@ -178,17 +177,17 @@ class Trainer:
         assert len(optimizers) == len(schedulers), (len(optimizers), len(schedulers))
 
         if isinstance(trainer_options.keep_nbest_models, int):
-            keep_nbest_models = trainer_options.keep_nbest_models
+            keep_nbest_models = [trainer_options.keep_nbest_models]
         else:
             if len(trainer_options.keep_nbest_models) == 0:
                 logging.warning("No keep_nbest_models is given. Change to [1]")
                 trainer_options.keep_nbest_models = [1]
-            keep_nbest_models = max(trainer_options.keep_nbest_models)
+            keep_nbest_models = trainer_options.keep_nbest_models
 
         output_dir = Path(trainer_options.output_dir)
         reporter = Reporter()
         if trainer_options.use_amp:
-            if LooseVersion(torch.__version__) < LooseVersion("1.6.0"):
+            if V(torch.__version__) < V("1.6.0"):
                 raise RuntimeError(
                     "Require torch>=1.6.0 for  Automatic Mixed Precision"
                 )
@@ -247,7 +246,6 @@ class Trainer:
             dp_model = torch.nn.parallel.DataParallel(
                 model,
                 device_ids=list(range(distributed_option.ngpu)),
-                find_unused_parameters=trainer_options.unused_parameters,
             )
         else:
             # NOTE(kamo): DataParallel also should work with ngpu=1,
@@ -257,9 +255,16 @@ class Trainer:
         if trainer_options.use_tensorboard and (
             not distributed_option.distributed or distributed_option.dist_rank == 0
         ):
-            summary_writer = SummaryWriter(str(output_dir / "tensorboard"))
+            from torch.utils.tensorboard import SummaryWriter
+
+            train_summary_writer = SummaryWriter(
+                str(output_dir / "tensorboard" / "train")
+            )
+            valid_summary_writer = SummaryWriter(
+                str(output_dir / "tensorboard" / "valid")
+            )
         else:
-            summary_writer = None
+            train_summary_writer = None
 
         start_time = time.perf_counter()
         for iepoch in range(start_epoch, trainer_options.max_epoch + 1):
@@ -289,7 +294,7 @@ class Trainer:
                     iterator=train_iter_factory.build_iter(iepoch),
                     reporter=sub_reporter,
                     scaler=scaler,
-                    summary_writer=summary_writer,
+                    summary_writer=train_summary_writer,
                     options=trainer_options,
                     distributed_option=distributed_option,
                 )
@@ -302,7 +307,6 @@ class Trainer:
                     options=trainer_options,
                     distributed_option=distributed_option,
                 )
-
             if not distributed_option.distributed or distributed_option.dist_rank == 0:
                 # att_plot doesn't support distributed
                 if plot_attention_iter_factory is not None:
@@ -310,7 +314,7 @@ class Trainer:
                         cls.plot_attention(
                             model=model,
                             output_dir=output_dir / "att_ws",
-                            summary_writer=summary_writer,
+                            summary_writer=train_summary_writer,
                             iterator=plot_attention_iter_factory.build_iter(iepoch),
                             reporter=sub_reporter,
                             options=trainer_options,
@@ -332,9 +336,11 @@ class Trainer:
             if not distributed_option.distributed or distributed_option.dist_rank == 0:
                 # 3. Report the results
                 logging.info(reporter.log_message())
-                reporter.matplotlib_plot(output_dir / "images")
-                if summary_writer is not None:
-                    reporter.tensorboard_add_scalar(summary_writer)
+                if trainer_options.use_matplotlib:
+                    reporter.matplotlib_plot(output_dir / "images")
+                if train_summary_writer is not None:
+                    reporter.tensorboard_add_scalar(train_summary_writer, key1="train")
+                    reporter.tensorboard_add_scalar(valid_summary_writer, key1="valid")
                 if trainer_options.use_wandb:
                     reporter.wandb_log()
 
@@ -353,7 +359,7 @@ class Trainer:
                     output_dir / "checkpoint.pth",
                 )
 
-                # 5. Save the model and update the link to the best model
+                # 5. Save and log the model and update the link to the best model
                 torch.save(model.state_dict(), output_dir / f"{iepoch}epoch.pth")
 
                 # Creates a sym link latest.pth -> {iepoch}epoch.pth
@@ -381,16 +387,50 @@ class Trainer:
                         "The best model has been updated: " + ", ".join(_improved)
                     )
 
+                log_model = (
+                    trainer_options.wandb_model_log_interval > 0
+                    and iepoch % trainer_options.wandb_model_log_interval == 0
+                )
+                if log_model and trainer_options.use_wandb:
+                    import wandb
+
+                    logging.info("Logging Model on this epoch :::::")
+                    artifact = wandb.Artifact(
+                        name=f"model_{wandb.run.id}",
+                        type="model",
+                        metadata={"improved": _improved},
+                    )
+                    artifact.add_file(str(output_dir / f"{iepoch}epoch.pth"))
+                    aliases = [
+                        f"epoch-{iepoch}",
+                        "best" if best_epoch == iepoch else "",
+                    ]
+                    wandb.log_artifact(artifact, aliases=aliases)
+
                 # 6. Remove the model files excluding n-best epoch and latest epoch
                 _removed = []
                 # Get the union set of the n-best among multiple criterion
                 nbests = set().union(
                     *[
-                        set(reporter.sort_epochs(ph, k, m)[:keep_nbest_models])
+                        set(reporter.sort_epochs(ph, k, m)[: max(keep_nbest_models)])
                         for ph, k, m in trainer_options.best_model_criterion
                         if reporter.has(ph, k)
                     ]
                 )
+
+                # Generated n-best averaged model
+                if (
+                    trainer_options.nbest_averaging_interval > 0
+                    and iepoch % trainer_options.nbest_averaging_interval == 0
+                ):
+                    average_nbest_models(
+                        reporter=reporter,
+                        output_dir=output_dir,
+                        best_model_criterion=trainer_options.best_model_criterion,
+                        nbest=keep_nbest_models,
+                        suffix=f"till{iepoch}epoch",
+                    )
+
                 for e in range(1, iepoch):
                     p = output_dir / f"{e}epoch.pth"
                     if p.exists() and e not in nbests:
@@ -402,7 +442,7 @@ class Trainer:
             # 7. If any updating haven't happened, stops the training
             if all_steps_are_invalid:
                 logging.warning(
-                    f"The gradients at all steps are invalid in this epoch. "
+                    "The gradients at all steps are invalid in this epoch. "
                     f"Something seems wrong. This training was stopped at {iepoch}epoch"
                 )
                 break
@@ -419,8 +459,8 @@ class Trainer:
                 f"The training was finished at {trainer_options.max_epoch} epochs "
             )
 
+        # Generated n-best averaged model
         if not distributed_option.distributed or distributed_option.dist_rank == 0:
-            # Generated n-best averaged model
             average_nbest_models(
                 reporter=reporter,
                 output_dir=output_dir,
@@ -437,7 +477,7 @@ class Trainer:
         schedulers: Sequence[Optional[AbsScheduler]],
         scaler: Optional[GradScaler],
         reporter: SubReporter,
-        summary_writer: Optional[SummaryWriter],
+        summary_writer,
         options: TrainerOptions,
         distributed_option: DistributedOption,
     ) -> bool:
@@ -451,6 +491,7 @@ class Trainer:
         no_forward_run = options.no_forward_run
         ngpu = options.ngpu
         use_wandb = options.use_wandb
+        create_graph_in_tensorboard = options.create_graph_in_tensorboard
         distributed = distributed_option.distributed
 
         if log_interval is None:
@@ -466,7 +507,7 @@ class Trainer:
         iterator_stop = torch.tensor(0).to("cuda" if ngpu > 0 else "cpu")
 
         start_time = time.perf_counter()
-        for iiter, (_, batch) in enumerate(
+        for iiter, (utt_id, batch) in enumerate(
             reporter.measure_iter_time(iterator, "iter_time"), 1
         ):
             assert isinstance(batch, dict), type(batch)
@@ -476,12 +517,52 @@ class Trainer:
                 if iterator_stop > 0:
                     break
 
+            batch["utt_id"] = utt_id
+
             batch = to_device(batch, "cuda" if ngpu > 0 else "cpu")
             if no_forward_run:
                 all_steps_are_invalid = False
                 continue
 
-            with autocast(scaler is not None):
+            if (
+                create_graph_in_tensorboard
+                and iiter == 1
+                and summary_writer is not None
+            ):
+                if distributed:
+                    _model = getattr(model, "module")
+                else:
+                    _model = model
+                    if _model is not None:
+                        try:
+                            _args = kwargs2args(_model.forward, batch)
+                        except (ValueError, TypeError):
+                            logging.warning(
+                                "inpect.signature() is failed for the model. "
+                                "The graph can't be added for tensorboard."
+                            )
+                        else:
+                            try:
+                                summary_writer.add_graph(
+                                    _model, _args, use_strict_trace=False
+                                )
+                            except Exception:
+                                logging.warning(
+                                    "summary_writer.add_graph() "
+                                    "is failed for the model. "
+                                    "The graph can't be added for tensorboard."
+                                )
+                            del _args
+                    else:
+                        logging.warning(
+                            "model.module is not found (This should be a bug.)"
+                        )
+                del _model
+
+            with autocast(
+                scaler is not None,
+                **autocast_args,
+            ):
                 with reporter.measure_time("forward_time"):
                     retval = model(**batch)
 
@@ -597,6 +678,17 @@ class Trainer:
                             scaler.update()
 
                 else:
+                    reporter.register(
+                        {
+                            "grad_norm": grad_norm,
+                            "clip": torch.where(
+                                grad_norm > grad_clip,
+                                grad_norm.new_tensor(100),
+                                grad_norm.new_tensor(0),
+                            ),
+                            "loss_scale": scaler.get_scale() if scaler else 1.0,
+                        }
+                    )
                     all_steps_are_invalid = False
                     with reporter.measure_time("optim_step_time"):
                         for iopt, (optimizer, scheduler) in enumerate(
@@ -614,7 +706,10 @@ class Trainer:
                                 optimizer.step()
                             if isinstance(scheduler, AbsBatchStepScheduler):
                                 scheduler.step()
-                            optimizer.zero_grad()
+                for iopt, optimizer in enumerate(optimizers):
+                    if optim_idx is not None and iopt != optim_idx:
+                        continue
+                    optimizer.zero_grad()
 
                 # Register lr and train/load time[sec/step],
                 # where step refers to accum_grad * mini-batch
@@ -644,7 +739,6 @@ class Trainer:
             if distributed:
                 iterator_stop.fill_(1)
                 torch.distributed.all_reduce(iterator_stop, ReduceOp.SUM)
-
         return all_steps_are_invalid
 
     @classmethod
@@ -667,12 +761,14 @@ class Trainer:
         # [For distributed] Because iteration counts are not always equals between
         # processes, send stop-flag to the other processes if iterator is finished
         iterator_stop = torch.tensor(0).to("cuda" if ngpu > 0 else "cpu")
-        for (_, batch) in iterator:
+        for utt_id, batch in iterator:
             assert isinstance(batch, dict), type(batch)
             if distributed:
                 torch.distributed.all_reduce(iterator_stop, ReduceOp.SUM)
                 if iterator_stop > 0:
                     break
+
+            batch["utt_id"] = utt_id
 
             batch = to_device(batch, "cuda" if ngpu > 0 else "cpu")
             if no_forward_run:
@@ -703,7 +799,7 @@ class Trainer:
         cls,
         model: torch.nn.Module,
         output_dir: Optional[Path],
-        summary_writer: Optional[SummaryWriter],
+        summary_writer,
         iterator: Iterable[Tuple[List[str], Dict[str, torch.Tensor]]],
         reporter: SubReporter,
         options: TrainerOptions,
@@ -725,6 +821,9 @@ class Trainer:
                 len(next(iter(batch.values()))),
                 len(ids),
             )
+
+            batch["utt_id"] = ids
+
             batch = to_device(batch, "cuda" if ngpu > 0 else "cpu")
             if no_forward_run:
                 continue
@@ -737,14 +836,18 @@ class Trainer:
             for k, att_list in att_dict.items():
                 assert len(att_list) == len(ids), (len(att_list), len(ids))
                 for id_, att_w in zip(ids, att_list):
-
                     if isinstance(att_w, torch.Tensor):
                         att_w = att_w.detach().cpu().numpy()
 
                     if att_w.ndim == 2:
                         att_w = att_w[None]
-                    elif att_w.ndim > 3 or att_w.ndim == 1:
-                        raise RuntimeError(f"Must be 2 or 3 dimension: {att_w.ndim}")
+                    elif att_w.ndim == 4:
+                        # In multispkr_asr model case, the dimension could be 4.
+                        att_w = np.concatenate(
+                            [att_w[i] for i in range(att_w.shape[0])], axis=0
+                        )
+                    elif att_w.ndim > 4 or att_w.ndim == 1:
+                        raise RuntimeError(f"Must be 2, 3 or 4 dimension: {att_w.ndim}")
 
                     w, h = plt.figaspect(1.0 / len(att_w))
                     fig = plt.Figure(figsize=(w * 1.3, h * 1.3))
@@ -769,4 +872,9 @@ class Trainer:
                         summary_writer.add_figure(
                             f"{k}_{id_}", fig, reporter.get_epoch()
                         )
+
+                    if options.use_wandb:
+                        import wandb
+
+                        wandb.log({f"attention plot/{k}_{id_}": wandb.Image(fig)})
             reporter.next()

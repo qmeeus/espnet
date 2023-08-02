@@ -1,6 +1,6 @@
-from collections import OrderedDict
-from typing import Tuple
 import warnings
+from collections import OrderedDict
+from typing import Dict, Optional, Tuple
 
 import torch
 
@@ -20,7 +20,7 @@ class AsteroidModel_Converter(AbsSeparator):
         """The class to convert the models from asteroid to AbsSeprator.
 
         Args:
-            encoder_output_dim: input feature dimension, deafult=1 after the NullEncoder
+            encoder_output_dim: input feature dimension, default=1 after the NullEncoder
             num_spk: number of speakers
             loss_type: loss type of enhancement
             model_name: Asteroid model names, e.g. ConvTasNet, DPTNet. Refers to
@@ -66,12 +66,18 @@ class AsteroidModel_Converter(AbsSeparator):
         if loss_type != "si_snr":
             raise ValueError("Unsupported loss type: %s" % loss_type)
 
-    def forward(self, input: torch.Tensor, ilens: torch.Tensor = None):
+    def forward(
+        self,
+        input: torch.Tensor,
+        ilens: torch.Tensor = None,
+        additional: Optional[Dict] = None,
+    ):
         """Whole forward of asteroid models.
 
         Args:
             input (torch.Tensor): Raw Waveforms [B, T]
             ilens (torch.Tensor): input lengths [B]
+            additional (Dict or None): other data included in model
 
         Returns:
             estimated Waveforms(List[Union(torch.Tensor]): [(B, T), ...]
@@ -103,7 +109,7 @@ class AsteroidModel_Converter(AbsSeparator):
     def forward_rawwav(
         self, input: torch.Tensor, ilens: torch.Tensor = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Output with waveforms. """
+        """Output with waveforms."""
         return self.forward(input, ilens)
 
     @property

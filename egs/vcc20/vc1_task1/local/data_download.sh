@@ -1,4 +1,5 @@
-#!/usr/bin/env bash -e
+#!/usr/bin/env bash
+set -e
 
 # Copyright 2020 Nagoya University (Wen-Chin Huang)
 #  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
@@ -29,17 +30,17 @@ if [ ! -e ${db}/.done ]; then
     mkdir -p ${db}
     cd ${db}
     git clone https://github.com/nii-yamagishilab/VCC2020-database.git
-    
+
     cd VCC2020-database
     unzip '*.zip'
     rm -rf __MACOSX/ # remove extra folder
-    
+
     # integrate source waveforms
     for srcspk in "${srcspks[@]}"; do
         mv vcc2020_database_evaluation/${srcspk}/*.wav source/${srcspk}/
     done
     mv source/* ./
-    
+
     # integrate target waveforms
     for trgspk in "${trgspks_task1[@]}"; do
         mv vcc2020_database_groundtruth/${trgspk}/*.wav target_task1/${trgspk}/

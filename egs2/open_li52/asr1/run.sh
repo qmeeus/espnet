@@ -72,4 +72,3 @@ inference_config=conf/decode_asr.yaml
     --nlsyms_txt "${nlsyms_txt}" \
     --lm_train_text "data/${train_set}/text" \
     --local_score_opts "--score_lang_id ${lid}" "$@"
-

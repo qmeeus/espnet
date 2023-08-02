@@ -7,10 +7,7 @@
 """Decoder definition."""
 
 import logging
-
-from typing import Any
-from typing import List
-from typing import Tuple
+from typing import Any, List, Tuple
 
 import torch
 
@@ -25,7 +22,7 @@ from espnet.nets.pytorch_backend.transformer.lightconv import LightweightConvolu
 from espnet.nets.pytorch_backend.transformer.lightconv2d import LightweightConvolution2D
 from espnet.nets.pytorch_backend.transformer.mask import subsequent_mask
 from espnet.nets.pytorch_backend.transformer.positionwise_feed_forward import (
-    PositionwiseFeedForward,  # noqa: H301
+    PositionwiseFeedForward,
 )
 from espnet.nets.pytorch_backend.transformer.repeat import repeat
 from espnet.nets.scorer_interface import BatchScorerInterface
@@ -50,7 +47,7 @@ class Decoder(BatchScorerInterface, torch.nn.Module):
     Args:
         odim (int): Output diminsion.
         self_attention_layer_type (str): Self-attention layer type.
-        attention_dim (int): Dimention of attention.
+        attention_dim (int): Dimension of attention.
         attention_heads (int): The number of heads of multi head attention.
         conv_wshare (int): The number of kernel of convolution. Only used in
             self_attention_layer_type == "lightconv*" or "dynamiconv*".
@@ -150,7 +147,7 @@ class Decoder(BatchScorerInterface, torch.nn.Module):
         elif selfattention_layer_type == "lightconv2d":
             logging.info(
                 "decoder self-attention layer "
-                "type = lightweight convolution 2-dimentional"
+                "type = lightweight convolution 2-dimensional"
             )
             decoder_selfattn_layer = LightweightConvolution2D
             decoder_selfattn_layer_args = [
@@ -180,7 +177,7 @@ class Decoder(BatchScorerInterface, torch.nn.Module):
             ]
         elif selfattention_layer_type == "dynamicconv2d":
             logging.info(
-                "decoder self-attention layer type = dynamic convolution 2-dimentional"
+                "decoder self-attention layer type = dynamic convolution 2-dimensional"
             )
             decoder_selfattn_layer = DynamicConvolution2D
             decoder_selfattn_layer_args = [
