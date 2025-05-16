@@ -4,13 +4,14 @@ from typing import Callable, Collection, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
-from typeguard import check_argument_types, check_return_type
+from typeguard import typechecked
 
 from espnet2.asr.ctc import CTC
 from espnet2.asr.decoder.abs_decoder import AbsDecoder
 from espnet2.asr.decoder.hugging_face_transformers_decoder import (  # noqa: H301
     HuggingFaceTransformersDecoder,
 )
+from espnet2.asr.decoder.linear_decoder import LinearDecoder
 from espnet2.asr.decoder.mlm_decoder import MLMDecoder
 from espnet2.asr.decoder.rnn_decoder import RNNDecoder
 from espnet2.asr.decoder.s4_decoder import S4Decoder
@@ -25,6 +26,7 @@ from espnet2.asr.decoder.transformer_decoder import (
 from espnet2.asr.decoder.whisper_decoder import OpenAIWhisperDecoder
 from espnet2.asr.encoder.abs_encoder import AbsEncoder
 from espnet2.asr.encoder.avhubert_encoder import FairseqAVHubertEncoder
+from espnet2.asr.encoder.beats_encoder import BeatsEncoder
 from espnet2.asr.encoder.branchformer_encoder import BranchformerEncoder
 from espnet2.asr.encoder.conformer_encoder import ConformerEncoder
 from espnet2.asr.encoder.contextual_block_conformer_encoder import (
@@ -40,6 +42,7 @@ from espnet2.asr.encoder.hubert_encoder import (
     TorchAudioHuBERTPretrainEncoder,
 )
 from espnet2.asr.encoder.longformer_encoder import LongformerEncoder
+from espnet2.asr.encoder.multiconvformer_encoder import MultiConvConformerEncoder
 from espnet2.asr.encoder.rnn_encoder import RNNEncoder
 from espnet2.asr.encoder.transformer_encoder import TransformerEncoder
 from espnet2.asr.encoder.transformer_encoder_multispkr import (
@@ -52,6 +55,7 @@ from espnet2.asr.espnet_model import ESPnetASRModel
 from espnet2.asr.frontend.abs_frontend import AbsFrontend
 from espnet2.asr.frontend.default import DefaultFrontend
 from espnet2.asr.frontend.fused import FusedFrontends
+from espnet2.asr.frontend.huggingface import HuggingFaceFrontend
 from espnet2.asr.frontend.s3prl import S3prlFrontend
 from espnet2.asr.frontend.whisper import WhisperFrontend
 from espnet2.asr.frontend.windowing import SlidingWindow
@@ -95,7 +99,8 @@ frontend_choices = ClassChoices(
         s3prl=S3prlFrontend,
         fused=FusedFrontends,
         whisper=WhisperFrontend,
-    ),
+        huggingface=HuggingFaceFrontend,
+    ),  # If setting this to none, please make sure to provide input_size in the config.
     type_check=AbsFrontend,
     default="default",
 )
@@ -157,6 +162,8 @@ encoder_choices = ClassChoices(
         whisper=OpenAIWhisperEncoder,
         e_branchformer=EBranchformerEncoder,
         avhubert=FairseqAVHubertEncoder,
+        multiconv_conformer=MultiConvConformerEncoder,
+        beats=BeatsEncoder,
     ),
     type_check=AbsEncoder,
     default="rnn",
@@ -185,6 +192,9 @@ decoder_choices = ClassChoices(
         whisper=OpenAIWhisperDecoder,
         hugging_face_transformers=HuggingFaceTransformersDecoder,
         s4=S4Decoder,
+        linear_decoder=LinearDecoder,
+        # This decoder is only meant for classification tasks.
+        # TODO(shikhar): Move classification to cls1 task completely.
     ),
     type_check=AbsDecoder,
     default=None,
@@ -256,6 +266,7 @@ class ASRTask(AbsTask):
                 "xavier_normal",
                 "kaiming_uniform",
                 "kaiming_normal",
+                "normal",
                 None,
             ],
         )
@@ -403,19 +414,19 @@ class ASRTask(AbsTask):
             class_choices.add_arguments(group)
 
     @classmethod
+    @typechecked
     def build_collate_fn(cls, args: argparse.Namespace, train: bool) -> Callable[
         [Collection[Tuple[str, Dict[str, np.ndarray]]]],
         Tuple[List[str], Dict[str, torch.Tensor]],
     ]:
-        assert check_argument_types()
         # NOTE(kamo): int value = 0 is reserved by CTC-blank symbol
         return CommonCollateFn(float_pad_value=0.0, int_pad_value=-1)
 
     @classmethod
+    @typechecked
     def build_preprocess_fn(
         cls, args: argparse.Namespace, train: bool
     ) -> Optional[Callable[[str, Dict[str, np.array]], Dict[str, np.ndarray]]]:
-        assert check_argument_types()
         if args.use_preprocessor:
             try:
                 _ = getattr(args, "preprocessor")
@@ -467,7 +478,6 @@ class ASRTask(AbsTask):
             )
         else:
             retval = None
-        assert check_return_type(retval)
         return retval
 
     @classmethod
@@ -492,12 +502,11 @@ class ASRTask(AbsTask):
         retval = tuple(retval)
 
         logging.info(f"Optional Data Names: {retval }")
-        assert check_return_type(retval)
         return retval
 
     @classmethod
+    @typechecked
     def build_model(cls, args: argparse.Namespace) -> ESPnetASRModel:
-        assert check_argument_types()
         if isinstance(args.token_list, str):
             with open(args.token_list, encoding="utf-8") as f:
                 token_list = [line.rstrip() for line in f]
@@ -632,5 +641,4 @@ class ASRTask(AbsTask):
         if args.init is not None:
             initialize(model, args.init)
 
-        assert check_return_type(model)
         return model

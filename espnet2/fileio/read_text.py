@@ -3,13 +3,19 @@ import logging
 from mmap import mmap
 from pathlib import Path
 from random import randint
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Set, Tuple, Union
 
-from typeguard import check_argument_types
+from typeguard import typechecked
 
 
-def read_2columns_text(path: Union[Path, str]) -> Dict[str, str]:
+@typechecked
+def read_2columns_text(
+    path: Union[Path, str],
+    keys_to_load: Optional[Set[Union[str, int]]] = None,
+) -> Dict[str, str]:
     """Read a text file having 2 columns as dict object.
+
+    Only load the keys in keys_to_load if it is not None.
 
     Examples:
         wav.scp:
@@ -20,7 +26,12 @@ def read_2columns_text(path: Union[Path, str]) -> Dict[str, str]:
         {'key1': '/some/path/a.wav', 'key2': '/some/path/b.wav'}
 
     """
-    assert check_argument_types()
+
+    if keys_to_load is not None:
+        logging.info(
+            f"keys_to_load is not None, only loading {len(keys_to_load)} keys "
+            f"from {path}"
+        )
 
     data = {}
     with Path(path).open("r", encoding="utf-8") as f:
@@ -31,12 +42,16 @@ def read_2columns_text(path: Union[Path, str]) -> Dict[str, str]:
             else:
                 k, v = sps
 
+            if keys_to_load is not None and k not in keys_to_load:
+                continue
+
             if k in data:
                 raise RuntimeError(f"{k} is duplicated ({path}:{linenum})")
             data[k] = v
     return data
 
 
+@typechecked
 def read_multi_columns_text(
     path: Union[Path, str], return_unsplit: bool = False
 ) -> Tuple[Dict[str, List[str]], Optional[Dict[str, str]]]:
@@ -55,7 +70,6 @@ def read_multi_columns_text(
          'key3': ['/some/path/c1.wav']}
 
     """
-    assert check_argument_types()
 
     data = {}
 
@@ -82,6 +96,7 @@ def read_multi_columns_text(
     return data, unsplit_data
 
 
+@typechecked
 def load_num_sequence_text(
     path: Union[Path, str], loader_type: str = "csv_int"
 ) -> Dict[str, List[Union[float, int]]]:
@@ -94,7 +109,6 @@ def load_num_sequence_text(
         >>> d = load_num_sequence_text('text')
         >>> np.testing.assert_array_equal(d["key1"], np.array([1, 2, 3]))
     """
-    assert check_argument_types()
     if loader_type == "text_int":
         delimiter = " "
         dtype = int
@@ -128,7 +142,8 @@ def load_num_sequence_text(
     return retval
 
 
-def read_label(path: Union[Path, str]) -> Dict[str, List[Union[float, int]]]:
+@typechecked
+def read_label(path: Union[Path, str]) -> Dict[str, List[List[Union[str, float, int]]]]:
     """Read a text file indicating sequences of number
 
     Examples:
@@ -138,7 +153,6 @@ def read_label(path: Union[Path, str]) -> Dict[str, List[Union[float, int]]]:
         >>> d = load_num_sequence_text('label')
         >>> np.testing.assert_array_equal(d["key1"], [0.1, 0.2, "啊"]))
     """
-    assert check_argument_types()
     label = open(path, "r", encoding="utf-8")
 
     retval = {}
@@ -180,11 +194,11 @@ class RandomTextReader(collections.abc.Mapping):
             (text start at bytes 21 and end at bytes 30 (including "\n"))
     """
 
+    @typechecked
     def __init__(
         self,
         text_and_scp: str,
     ):
-        assert check_argument_types()
         super().__init__()
 
         text, text_scp = text_and_scp.split("-")

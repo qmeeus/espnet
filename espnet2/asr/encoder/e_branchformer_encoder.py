@@ -2,6 +2,7 @@
 #  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
 
 """E-Branchformer encoder definition.
+
 Reference:
     Kwangyoun Kim, Felix Wu, Yifan Peng, Jing Pan,
     Prashant Sridhar, Kyu J. Han, Shinji Watanabe,
@@ -13,7 +14,7 @@ import logging
 from typing import List, Optional, Tuple
 
 import torch
-from typeguard import check_argument_types
+from typeguard import typechecked
 
 from espnet2.asr.ctc import CTC
 from espnet2.asr.encoder.abs_encoder import AbsEncoder
@@ -26,6 +27,7 @@ from espnet.nets.pytorch_backend.transformer.attention import (  # noqa: H301
     RelPositionMultiHeadedAttention,
 )
 from espnet.nets.pytorch_backend.transformer.embedding import (  # noqa: H301
+    ConvolutionalPositionalEmbedding,
     LegacyRelPositionalEncoding,
     PositionalEncoding,
     RelPositionalEncoding,
@@ -184,6 +186,7 @@ class EBranchformerEncoderLayer(torch.nn.Module):
 class EBranchformerEncoder(AbsEncoder):
     """E-Branchformer encoder module."""
 
+    @typechecked
     def __init__(
         self,
         input_size: int,
@@ -213,8 +216,10 @@ class EBranchformerEncoder(AbsEncoder):
         merge_conv_kernel: int = 3,
         interctc_layer_idx=None,
         interctc_use_conditioning: bool = False,
+        qk_norm: bool = False,
+        use_flash_attn: bool = True,
+        gradient_checkpoint_layers: List[int] = [],
     ):
-        assert check_argument_types()
         super().__init__()
         self._output_size = output_size
 
@@ -231,6 +236,8 @@ class EBranchformerEncoder(AbsEncoder):
 
         if pos_enc_layer_type == "abs_pos":
             pos_enc_class = PositionalEncoding
+        elif pos_enc_layer_type == "conv":
+            pos_enc_class = ConvolutionalPositionalEmbedding
         elif pos_enc_layer_type == "scaled_abs_pos":
             pos_enc_class = ScaledPositionalEncoding
         elif pos_enc_layer_type == "rel_pos":
@@ -343,11 +350,27 @@ class EBranchformerEncoder(AbsEncoder):
             raise ValueError("Support only linear.")
 
         if attention_layer_type == "selfattn":
+            # Default to flash attention unless overrided by user
+            if use_flash_attn:
+                try:
+                    from espnet2.torch_utils.get_flash_attn_compatability import (
+                        is_flash_attn_supported,
+                    )
+
+                    use_flash_attn = is_flash_attn_supported()
+                    import flash_attn  # noqa
+                except Exception:
+                    use_flash_attn = False
+
             encoder_selfattn_layer = MultiHeadedAttention
             encoder_selfattn_layer_args = (
                 attention_heads,
                 output_size,
                 attention_dropout_rate,
+                qk_norm,
+                use_flash_attn,
+                False,
+                False,
             )
         elif attention_layer_type == "legacy_rel_selfattn":
             assert pos_enc_layer_type == "legacy_rel_pos"
@@ -409,6 +432,8 @@ class EBranchformerEncoder(AbsEncoder):
         )
         self.after_norm = LayerNorm(output_size)
 
+        self.layer_drop_rate = layer_drop_rate
+
         if interctc_layer_idx is None:
             interctc_layer_idx = []
         self.interctc_layer_idx = interctc_layer_idx
@@ -416,6 +441,11 @@ class EBranchformerEncoder(AbsEncoder):
             assert 0 < min(interctc_layer_idx) and max(interctc_layer_idx) < num_blocks
         self.interctc_use_conditioning = interctc_use_conditioning
         self.conditioning_layer = None
+
+        # For gradient checkpointing
+        # 0 is the embedding layer, 1 is the first encoder layer, etc.
+        self.gradient_checkpoint_layers = gradient_checkpoint_layers
+        logging.info(f"Gradient checkpoint layers: {self.gradient_checkpoint_layers}")
 
     def output_size(self) -> int:
         return self._output_size
@@ -425,8 +455,10 @@ class EBranchformerEncoder(AbsEncoder):
         xs_pad: torch.Tensor,
         ilens: torch.Tensor,
         prev_states: torch.Tensor = None,
+        masks: torch.Tensor = None,
         ctc: CTC = None,
         max_layer: int = None,
+        return_all_hs: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
         """Calculate forward propagation.
 
@@ -442,7 +474,10 @@ class EBranchformerEncoder(AbsEncoder):
             torch.Tensor: Not to be used now.
         """
 
-        masks = (~make_pad_mask(ilens)[:, None, :]).to(xs_pad.device)
+        if masks is None:
+            masks = (~make_pad_mask(ilens)[:, None, :]).to(xs_pad.device)
+        else:
+            masks = ~masks[:, None, :]
 
         if (
             isinstance(self.embed, Conv2dSubsampling)
@@ -462,40 +497,61 @@ class EBranchformerEncoder(AbsEncoder):
                     xs_pad.size(1),
                     limit_size,
                 )
-            xs_pad, masks = self.embed(xs_pad, masks)
+            if 0 in self.gradient_checkpoint_layers:
+                xs_pad, masks = torch.utils.checkpoint.checkpoint(
+                    self.embed, xs_pad, masks, use_reentrant=False
+                )
+            else:
+                xs_pad, masks = self.embed(xs_pad, masks)
         elif self.embed is not None:
-            xs_pad = self.embed(xs_pad)
+            if 0 in self.gradient_checkpoint_layers:
+                xs_pad = torch.utils.checkpoint.checkpoint(
+                    self.embed, xs_pad, use_reentrant=False
+                )
+            else:
+                xs_pad = self.embed(xs_pad)
 
         intermediate_outs = []
-        if len(self.interctc_layer_idx) == 0:
-            if max_layer is not None and 0 <= max_layer < len(self.encoders):
-                for layer_idx, encoder_layer in enumerate(self.encoders):
-                    xs_pad, masks = encoder_layer(xs_pad, masks)
-                    if layer_idx >= max_layer:
-                        break
+        for layer_idx, encoder_layer in enumerate(self.encoders):
+            if max_layer is not None and layer_idx >= max_layer:
+                break
+
+            if (
+                self.training
+                and torch.empty(1).uniform_().item() < self.layer_drop_rate
+            ):
+                continue
+
+            if layer_idx + 1 in self.gradient_checkpoint_layers:
+                xs_pad, masks = torch.utils.checkpoint.checkpoint(
+                    encoder_layer, xs_pad, masks, use_reentrant=False
+                )
             else:
-                xs_pad, masks = self.encoders(xs_pad, masks)
-        else:
-            for layer_idx, encoder_layer in enumerate(self.encoders):
                 xs_pad, masks = encoder_layer(xs_pad, masks)
 
-                if layer_idx + 1 in self.interctc_layer_idx:
-                    encoder_out = xs_pad
+            if return_all_hs:
+                if isinstance(xs_pad, tuple):
+                    intermediate_outs.append(xs_pad[0])
+                else:
+                    intermediate_outs.append(xs_pad)
 
-                    if isinstance(encoder_out, tuple):
-                        encoder_out = encoder_out[0]
+            elif layer_idx + 1 in self.interctc_layer_idx:
+                encoder_out = xs_pad
 
-                    intermediate_outs.append((layer_idx + 1, encoder_out))
+                if isinstance(encoder_out, tuple):
+                    encoder_out = encoder_out[0]
 
-                    if self.interctc_use_conditioning:
-                        ctc_out = ctc.softmax(encoder_out)
+                intermediate_outs.append((layer_idx + 1, encoder_out))
 
-                        if isinstance(xs_pad, tuple):
-                            xs_pad = list(xs_pad)
-                            xs_pad[0] = xs_pad[0] + self.conditioning_layer(ctc_out)
-                            xs_pad = tuple(xs_pad)
-                        else:
-                            xs_pad = xs_pad + self.conditioning_layer(ctc_out)
+                if self.interctc_use_conditioning:
+                    ctc_out = ctc.softmax(encoder_out)
+
+                    if isinstance(xs_pad, tuple):
+                        xs_pad = list(xs_pad)
+                        xs_pad[0] = xs_pad[0] + self.conditioning_layer(ctc_out)
+                        xs_pad = tuple(xs_pad)
+                    else:
+                        xs_pad = xs_pad + self.conditioning_layer(ctc_out)
 
         if isinstance(xs_pad, tuple):
             xs_pad = xs_pad[0]

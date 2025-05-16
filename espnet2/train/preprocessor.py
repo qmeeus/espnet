@@ -1,3 +1,4 @@
+import copy
 import json
 import logging
 import random
@@ -10,8 +11,9 @@ import librosa
 import numpy as np
 import scipy.signal
 import soundfile
-from typeguard import check_argument_types, check_return_type
+from typeguard import typechecked
 
+import espnet2.speechlm.definitions as speechlm_definitions
 from espnet2.layers.augmentation import DataAugmentation
 from espnet2.text.build_tokenizer import build_tokenizer
 from espnet2.text.cleaner import TextCleaner
@@ -139,18 +141,19 @@ class CommonPreprocessor(AbsPreprocessor):
         train: bool,
         use_lang_prompt: bool = False,
         use_nlp_prompt: bool = False,
-        token_type: str = None,
+        token_type: Optional[str] = None,
         token_list: Union[Path, str, Iterable[str]] = None,
         bpemodel: Union[Path, str, Iterable[str]] = None,
         text_cleaner: Collection[str] = None,
-        g2p_type: str = None,
+        g2p_type: Optional[str] = None,
         unk_symbol: str = "<unk>",
         space_symbol: str = "<space>",
         non_linguistic_symbols: Union[Path, str, Iterable[str]] = None,
-        delimiter: str = None,
-        rir_scp: str = None,
+        delimiter: Optional[str] = None,
+        force_single_channel: bool = False,
+        rir_scp: Optional[str] = None,
         rir_apply_prob: float = 1.0,
-        noise_scp: str = None,
+        noise_scp: Optional[str] = None,
         noise_apply_prob: float = 1.0,
         noise_db_range: str = "3_10",
         short_noise_thres: float = 0.5,
@@ -163,15 +166,19 @@ class CommonPreprocessor(AbsPreprocessor):
         data_aug_effects: List = None,
         data_aug_num: List[int] = [1, 1],
         data_aug_prob: float = 0.0,
+        # for padding of chunk iterator, working when > 0
+        min_sample_size: int = -1,
+        audio_pad_value: Union[float, int] = 0.0,
         # only use for whisper
-        whisper_language: str = None,
-        whisper_task: str = None,
+        whisper_language: Optional[str] = None,
+        whisper_task: Optional[str] = None,
     ):
         super().__init__(train)
         self.train = train
         self.speech_name = speech_name
         self.text_name = text_name
         self.speech_volume_normalize = speech_volume_normalize
+        self.force_single_channel = force_single_channel
         self.rir_apply_prob = rir_apply_prob
         self.noise_apply_prob = noise_apply_prob
         self.short_noise_thres = short_noise_thres
@@ -263,6 +270,10 @@ class CommonPreprocessor(AbsPreprocessor):
         else:
             self.data_aug = None
         self.data_aug_prob = data_aug_prob
+
+        # for padding of chunk iterator, working when > 0
+        self.min_sample_size = min_sample_size
+        self.audio_pad_value = audio_pad_value
 
     def _convolve_rir(self, speech, power, rirs, tgt_fs=None, single_channel=False):
         rir_path = np.random.choice(rirs)
@@ -369,10 +380,36 @@ class CommonPreprocessor(AbsPreprocessor):
             speech = speech + scale * noise
         return speech, noise
 
+    def _pad_speech(self, speech):
+        # NOTE(jiatong): Padding for chunk iterator
+        #                other padding are conducted in collate_fn
+
+        # right pad with given value
+        if speech.ndim == 1 and speech.shape[0] < self.min_sample_size:
+            # single channel cases
+            speech = np.pad(
+                speech,
+                (0, self.min_sample_size + 1 - speech.shape[0]),
+                mode="constant",
+                constant_values=(0, self.audio_pad_value),
+            )
+        elif speech.ndim == 2 and speech.shape[0] < self.min_sample_size:
+            # multi channel cases
+            speech = speech.T
+            speech = np.pad(
+                speech,
+                ((0, 0), (0, self.min_sample_size + 1 - speech.shape[1])),
+                mode="constant",
+                constant_values=((0, 0), (0, self.audio_pad_value)),
+            )
+            speech = speech.T
+
+        return speech
+
+    @typechecked
     def _speech_process(
         self, data: Dict[str, Union[str, np.ndarray]]
     ) -> Dict[str, Union[str, np.ndarray]]:
-        assert check_argument_types()
         if self.speech_name in data:
             if self.train and (self.rirs is not None or self.noises is not None):
                 speech = data[self.speech_name]
@@ -382,6 +419,7 @@ class CommonPreprocessor(AbsPreprocessor):
                     speech = speech[None, :]
                 else:
                     speech = speech.T
+
                 # Calc power on non silence region
                 power = (speech[detect_non_silence(speech)] ** 2).mean()
 
@@ -414,11 +452,24 @@ class CommonPreprocessor(AbsPreprocessor):
                         data[self.speech_name], self.fs
                     )
 
+            if self.train and self.min_sample_size > 0:
+                # NOTE(jiatong): Padding for chunk iterator
+                #                other padding are conducted in collate_fn
+                data[self.speech_name] = self._pad_speech(data[self.speech_name])
+
             if self.speech_volume_normalize is not None:
                 speech = data[self.speech_name]
                 ma = np.max(np.abs(speech))
-                data[self.speech_name] = speech * self.speech_volume_normalize / ma
-        assert check_return_type(data)
+                if ma != 0:
+                    data[self.speech_name] = speech * self.speech_volume_normalize / ma
+
+            if self.force_single_channel:
+                speech = data[self.speech_name]
+                if speech.ndim == 2:
+                    # NOTE(jiatong): default average across channels
+                    speech = np.mean(speech, axis=1, keepdims=False)
+                data[self.speech_name] = speech
+
         return data
 
     def _text_process(
@@ -486,13 +537,12 @@ class CommonPreprocessor(AbsPreprocessor):
                     tokens = self.tokenizer.text2tokens(text)
                     text_ints = self.token_id_converter.tokens2ids(tokens)
                     data[name] = np.array(text_ints, dtype=np.int64)
-        assert check_return_type(data)
         return data
 
+    @typechecked
     def __call__(
         self, uid: str, data: Dict[str, Union[str, np.ndarray]]
     ) -> Dict[str, np.ndarray]:
-        assert check_argument_types()
 
         data = self._speech_process(data)
         data = self._text_process(data)
@@ -503,19 +553,19 @@ class SLUPreprocessor(CommonPreprocessor):
     def __init__(
         self,
         train: bool,
-        token_type: str = None,
+        token_type: Optional[str] = None,
         token_list: Union[Path, str, Iterable[str]] = None,
         transcript_token_list: Union[Path, str, Iterable[str]] = None,
         bpemodel: Union[Path, str, Iterable[str]] = None,
         text_cleaner: Collection[str] = None,
-        g2p_type: str = None,
+        g2p_type: Optional[str] = None,
         unk_symbol: str = "<unk>",
         space_symbol: str = "<space>",
         non_linguistic_symbols: Union[Path, str, Iterable[str]] = None,
-        delimiter: str = None,
-        rir_scp: str = None,
+        delimiter: Optional[str] = None,
+        rir_scp: Optional[str] = None,
         rir_apply_prob: float = 1.0,
-        noise_scp: str = None,
+        noise_scp: Optional[str] = None,
         noise_apply_prob: float = 1.0,
         noise_db_range: str = "3_10",
         short_noise_thres: float = 0.5,
@@ -585,7 +635,6 @@ class SLUPreprocessor(CommonPreprocessor):
             tokens = self.transcript_tokenizer.text2tokens(text)
             text_ints = self.transcript_token_id_converter.tokens2ids(tokens)
             data["transcript"] = np.array(text_ints, dtype=np.int64)
-        assert check_return_type(data)
         return data
 
 
@@ -595,18 +644,18 @@ class CommonPreprocessor_multi(CommonPreprocessor):
         train: bool,
         use_lang_prompt: bool = False,
         use_nlp_prompt: bool = False,
-        token_type: str = None,
+        token_type: Optional[str] = None,
         token_list: Union[Path, str, Iterable[str]] = None,
         bpemodel: Union[Path, str, Iterable[str]] = None,
         text_cleaner: Collection[str] = None,
-        g2p_type: str = None,
+        g2p_type: Optional[str] = None,
         unk_symbol: str = "<unk>",
         space_symbol: str = "<space>",
         non_linguistic_symbols: Union[Path, str, Iterable[str]] = None,
-        delimiter: str = None,
-        rir_scp: str = None,
+        delimiter: Optional[str] = None,
+        rir_scp: Optional[str] = None,
         rir_apply_prob: float = 1.0,
-        noise_scp: str = None,
+        noise_scp: Optional[str] = None,
         noise_apply_prob: float = 1.0,
         noise_db_range: str = "3_10",
         short_noise_thres: float = 0.5,
@@ -620,8 +669,8 @@ class CommonPreprocessor_multi(CommonPreprocessor):
         data_aug_num: List[int] = [1, 1],
         data_aug_prob: float = 0.0,
         # only use for whisper
-        whisper_language: str = None,
-        whisper_task: str = None,
+        whisper_language: Optional[str] = None,
+        whisper_task: Optional[str] = None,
     ):
         super().__init__(
             train=train,
@@ -700,13 +749,12 @@ class CommonPreprocessor_multi(CommonPreprocessor):
                     tokens = self.tokenizer.text2tokens(text)
                     text_ints = self.token_id_converter.tokens2ids(tokens)
                     data[name] = np.array(text_ints, dtype=np.int64)
-        assert check_return_type(data)
         return data
 
+    @typechecked
     def __call__(
         self, uid: str, data: Dict[str, Union[str, np.ndarray]]
     ) -> Dict[str, np.ndarray]:
-        assert check_argument_types()
 
         data = self._speech_process(data)
         data = self._text_process(data)
@@ -725,10 +773,10 @@ class MutliTokenizerCommonPreprocessor(CommonPreprocessor):
         unk_symbol: str = "<unk>",
         space_symbol: str = "<space>",
         non_linguistic_symbols: Union[Path, str, Iterable[str]] = None,
-        delimiter: str = None,
-        rir_scp: str = None,
+        delimiter: Optional[str] = None,
+        rir_scp: Optional[str] = None,
         rir_apply_prob: float = 1.0,
-        noise_scp: str = None,
+        noise_scp: Optional[str] = None,
         noise_apply_prob: float = 1.0,
         noise_db_range: str = "3_10",
         short_noise_thres: float = 0.5,
@@ -742,7 +790,7 @@ class MutliTokenizerCommonPreprocessor(CommonPreprocessor):
         data_aug_prob: float = 0.0,
         # only use for whisper
         whisper_language: List[str] = None,
-        whisper_task: str = None,
+        whisper_task: Optional[str] = None,
     ):
         # TODO(jiatong): sync with Kamo and Jing on interface for preprocessor
         super().__init__(
@@ -844,7 +892,6 @@ class MutliTokenizerCommonPreprocessor(CommonPreprocessor):
                 tokens = self.tokenizer[i].text2tokens(text)
                 text_ints = self.token_id_converter[i].tokens2ids(tokens)
                 data[text_name] = np.array(text_ints, dtype=np.int64)
-        assert check_return_type(data)
         return data
 
 
@@ -852,13 +899,13 @@ class DynamicMixingPreprocessor(AbsPreprocessor):
     def __init__(
         self,
         train: bool,
-        source_scp: str = None,
+        source_scp: Optional[str] = None,
         ref_num: int = 2,
         dynamic_mixing_gain_db: float = 0.0,
         speech_name: str = "speech_mix",
         speech_ref_name_prefix: str = "speech_ref",
-        mixture_source_name: str = None,
-        utt2spk: str = None,
+        mixture_source_name: Optional[str] = None,
+        utt2spk: Optional[str] = None,
         categories: Optional[List] = None,
     ):
         super().__init__(train)
@@ -1003,7 +1050,6 @@ class DynamicMixingPreprocessor(AbsPreprocessor):
         if self.train:
             data = self._mix_speech_(uid, data)
 
-        assert check_return_type(data)
         return data
 
 
@@ -1013,9 +1059,9 @@ class EnhPreprocessor(CommonPreprocessor):
     def __init__(
         self,
         train: bool,
-        rir_scp: str = None,
+        rir_scp: Optional[str] = None,
         rir_apply_prob: float = 1.0,
-        noise_scp: str = None,
+        noise_scp: Optional[str] = None,
         noise_apply_prob: float = 1.0,
         noise_db_range: str = "3_10",
         short_noise_thres: float = 0.5,
@@ -1164,10 +1210,10 @@ class EnhPreprocessor(CommonPreprocessor):
             # (Nmic, Time)
             return signal[None, :] if signal.ndim == 1 else signal.T
 
-    def _get_early_signal(self, speech, rir, power):
+    def _get_early_signal(self, speech, rir, power, fs):
         predelay = 50  # milliseconds
         dt = np.argmax(rir, axis=1).min()
-        et = dt + (predelay * self.sample_rate) // 1000
+        et = dt + (predelay * fs) // 1000
         rir_early = rir[:, :et]
         speech2 = scipy.signal.convolve(speech, rir_early, mode="full")[
             :, : speech.shape[1]
@@ -1229,13 +1275,12 @@ class EnhPreprocessor(CommonPreprocessor):
                     break
         return start, start + tgt_length
 
+    @typechecked
     def _speech_process(
         self, uid: str, data: Dict[str, Union[str, np.ndarray]]
     ) -> Dict[str, Union[str, np.ndarray]]:
-        assert check_argument_types()
 
         if self.speech_name not in data:
-            assert check_return_type(data)
             return data
 
         num_spk = self.num_spk
@@ -1308,6 +1353,7 @@ class EnhPreprocessor(CommonPreprocessor):
             speech_mix = self._ensure_2d(data[self.speech_name])
             # 1. Convolve RIR
             if self.rirs is not None and self.rir_apply_prob >= np.random.random():
+                speech_ref0 = speech_ref
                 speech_ref, rir_ref = zip(
                     *[
                         self._convolve_rir(
@@ -1335,7 +1381,7 @@ class EnhPreprocessor(CommonPreprocessor):
                             if spk == 0 or len(dereverb_speech_ref) > 1:
                                 dereverb_name = self.dereverb_ref_name_prefix + suffix
                                 data[dereverb_name] = self._get_early_signal(
-                                    speech_ref[spk], rir_ref[spk], power_ref[spk]
+                                    speech_ref0[spk], rir_ref[spk], power_ref[spk], fs
                                 ).T
                 else:
                     for spk in range(num_spk):
@@ -1343,7 +1389,7 @@ class EnhPreprocessor(CommonPreprocessor):
                         speech_ref_name = self.speech_ref_name_prefix + suffix
                         # clean speech with early reflections (Time, Nmic)
                         data[speech_ref_name] = self._get_early_signal(
-                            speech_ref[spk], rir_ref[spk], power_ref[spk]
+                            speech_ref0[spk], rir_ref[spk], power_ref[spk], fs
                         ).T
 
                         if dereverb_speech_ref is not None:
@@ -1404,8 +1450,8 @@ class EnhPreprocessor(CommonPreprocessor):
                     # speed_perturb, time_stretch, polarity_inverse, reverse, etc.
                     speech_mix = self.data_aug(
                         speech_mix.T if speech_mix.shape[0] > 1 else speech_mix[0],
-                        self.sample_rate,
-                    )
+                        fs,
+                    ).T
 
             data[self.speech_name] = speech_mix.T
             ma = np.max(np.abs(data[self.speech_name]))
@@ -1426,7 +1472,10 @@ class EnhPreprocessor(CommonPreprocessor):
                 # use a fixed scale to make it deterministic
                 volume_scale = self.volume_low
             ma = np.max(np.abs(data[self.speech_name]))
-            self._apply_to_all_signals(data, lambda x: x * volume_scale / ma, num_spk)
+            if ma != 0:
+                self._apply_to_all_signals(
+                    data, lambda x: x * volume_scale / ma, num_spk
+                )
 
         if self.categories and "category" in data:
             category = data.pop("category")
@@ -1452,13 +1501,12 @@ class EnhPreprocessor(CommonPreprocessor):
                     assert data[k].shape == speech_mix.shape
                     data[k] = data[k][..., chs]
 
-        assert check_return_type(data)
         return data
 
+    @typechecked
     def __call__(
         self, uid: str, data: Dict[str, Union[str, np.ndarray]]
     ) -> Dict[str, np.ndarray]:
-        assert check_argument_types()
 
         data = self._speech_process(uid, data)
         data = self._text_process(data)
@@ -1471,15 +1519,15 @@ class SVSPreprocessor(AbsPreprocessor):
     def __init__(
         self,
         train: bool,
-        token_type: str = None,
+        token_type: Optional[str] = None,
         token_list: Union[Path, str, Iterable[str]] = None,
         bpemodel: Union[Path, str, Iterable[str]] = None,
         text_cleaner: Collection[str] = None,
-        g2p_type: str = None,
+        g2p_type: Optional[str] = None,
         unk_symbol: str = "<unk>",
         space_symbol: str = "<space>",
         non_linguistic_symbols: Union[Path, str, Iterable[str]] = None,
-        delimiter: str = None,
+        delimiter: Optional[str] = None,
         singing_volume_normalize: float = None,
         singing_name: str = "singing",
         text_name: str = "text",
@@ -1493,6 +1541,9 @@ class SVSPreprocessor(AbsPreprocessor):
             3: [0.1, 0.5, 1],
             4: [0.05, 0.1, 0.5, 1],
         },
+        discrete_token_name: str = "discrete_token",
+        pos_sample_name: str = "pos_idx",
+        neg_sample_name: str = "neg_idx",
     ):
         super().__init__(train)
         self.train = train
@@ -1505,6 +1556,9 @@ class SVSPreprocessor(AbsPreprocessor):
         self.singing_volume_normalize = singing_volume_normalize
         self.phn_seg = phn_seg
         self.time_shift = hop_length / fs
+        self.discrete_token_name = discrete_token_name
+        self.pos_sample_name = pos_sample_name
+        self.neg_sample_name = neg_sample_name
         if token_type is not None:
             if token_list is None:
                 raise ValueError("token_list is required if token_type is not None")
@@ -1527,18 +1581,21 @@ class SVSPreprocessor(AbsPreprocessor):
             self.tokenizer = None
             self.token_id_converter = None
 
+    @typechecked
     def __call__(
         self,
         uid: str,
         data: Dict[str, Union[str, np.ndarray, tuple]],
     ) -> Dict[str, np.ndarray]:
-        assert check_argument_types()
 
         if self.singing_name in data:
             if self.singing_volume_normalize is not None:
                 singing = data[self.singing_name]
                 ma = np.max(np.abs(singing))
-                data[self.singing_name] = singing * self.singing_volume_normalize / ma
+                if ma != 0:
+                    data[self.singing_name] = (
+                        singing * self.singing_volume_normalize / ma
+                    )
 
         if self.midi_name in data and self.label_name in data:
             # Load label info
@@ -1615,6 +1672,54 @@ class SVSPreprocessor(AbsPreprocessor):
             data["phn_cnt"] = phn_cnt
             data["slur"] = slur
 
+        # Infer case of music score
+        if self.midi_name in data and self.label_name not in data:
+            # Load score info
+            tempo, syb_info = data[self.midi_name]
+            phn_cnt = []
+            midi = []
+            duration_phn = []
+            duration_ruled_phn = []
+            duration_syb = []
+            slur = []
+
+            for st, et, syb, note, phns in syb_info:
+                dur = et - st
+                _duration_syb = int(dur / self.time_shift + 0.5)
+                phone = phns.split("_")
+                phn_num = len(phone)
+                phn_cnt.append(phn_num)
+                pre_seg = 0
+                for k in range(phn_num):
+                    _duration_ruled_phn = int(
+                        (self.phn_seg[phn_num][k] - pre_seg) * dur / self.time_shift
+                        + 0.5
+                    )
+                    pre_seg = self.phn_seg[phn_num][k]
+                    # phone level feature
+                    midi.append(note)
+                    duration_ruled_phn.append(_duration_ruled_phn)
+                    duration_syb.append(_duration_syb)
+                    if syb == "—":
+                        slur.append(1)
+                    else:
+                        slur.append(0)
+
+            data.pop(self.midi_name)
+
+            midi = np.array(midi, dtype=np.int64)
+            duration_syb = np.array(duration_syb, dtype=np.int64)
+            duration_ruled_phn = np.array(duration_ruled_phn, dtype=np.int64)
+            phn_cnt = np.array(phn_cnt, dtype=np.int64)
+            slur = np.array(slur, dtype=np.int64)
+
+            data["midi"] = midi
+            data["duration_phn"] = None
+            data["duration_ruled_phn"] = duration_ruled_phn
+            data["duration_syb"] = duration_syb
+            data["phn_cnt"] = phn_cnt
+            data["slur"] = slur
+
         # TODO(Yuning): Add score from midi
 
         if self.text_name in data and self.tokenizer is not None:
@@ -1627,6 +1732,9 @@ class SVSPreprocessor(AbsPreprocessor):
                 tokens = self.tokenizer.text2tokens(text)
                 _text_ints = self.token_id_converter.tokens2ids(tokens)
                 data[self.text_name] = np.array(_text_ints, dtype=np.int64)
+                # Infer case of music score
+                if "label" not in data:
+                    data["label"] = np.array(_text_ints, dtype=np.int64)
 
         return data
 
@@ -1637,14 +1745,14 @@ class TSEPreprocessor(EnhPreprocessor):
     def __init__(
         self,
         train: bool,
-        train_spk2enroll: str = None,
+        train_spk2enroll: Optional[str] = None,
         enroll_segment: int = None,
         load_spk_embedding: bool = False,
         load_all_speakers: bool = False,
         # inherited from EnhPreprocessor
-        rir_scp: str = None,
+        rir_scp: Optional[str] = None,
         rir_apply_prob: float = 1.0,
-        noise_scp: str = None,
+        noise_scp: Optional[str] = None,
         noise_apply_prob: float = 1.0,
         noise_db_range: str = "3_10",
         short_noise_thres: float = 0.5,
@@ -1753,10 +1861,10 @@ class TSEPreprocessor(EnhPreprocessor):
                 raise RuntimeError(f"Something wrong: {path}")
         return audio[:, 0]
 
+    @typechecked
     def _speech_process(
         self, uid: str, data: Dict[str, Union[str, np.ndarray]]
     ) -> Dict[str, Union[str, np.ndarray]]:
-        assert check_argument_types()
 
         ref_names = [k for k in data.keys() if re.match(r"speech_ref\d+", k)]
         num_spk = len(ref_names)
@@ -1846,13 +1954,12 @@ class TSEPreprocessor(EnhPreprocessor):
                     else:
                         data[name] = soundfile.read(data[name])[0]
 
-        assert check_return_type(data)
         return data
 
+    @typechecked
     def __call__(
         self, uid: str, data: Dict[str, Union[str, np.ndarray]]
     ) -> Dict[str, np.ndarray]:
-        assert check_argument_types()
 
         data = super()._speech_process(uid, data)
         data = self._speech_process(uid, data)
@@ -1886,10 +1993,10 @@ class SpkPreprocessor(CommonPreprocessor):
         self,
         train: bool,
         target_duration: float,  # in seconds
-        spk2utt: str = None,
+        spk2utt: Optional[str] = None,
         sample_rate: int = 16000,
         num_eval: int = 10,
-        rir_scp: str = None,
+        rir_scp: Optional[str] = None,
         rir_apply_prob: float = 1.0,
         noise_info: List[
             Tuple[float, str, Tuple[int, int], Tuple[float, float]]
@@ -1897,7 +2004,14 @@ class SpkPreprocessor(CommonPreprocessor):
         noise_apply_prob: float = 1.0,
         short_noise_thres: float = 0.5,
     ):
-        super().__init__(train, rir_scp=rir_scp, rir_apply_prob=rir_apply_prob)
+
+        self.train = train
+
+        if rir_apply_prob == 0:
+            self.rir_scp = None
+        else:
+            self.rir_scp = rir_scp
+        super().__init__(train, rir_scp=self.rir_scp, rir_apply_prob=rir_apply_prob)
 
         self.spk2label = None  # a dictionary that maps string speaker label to int
         self.sample_rate = sample_rate
@@ -1909,8 +2023,6 @@ class SpkPreprocessor(CommonPreprocessor):
                 self.spk2utt = f_s2u.readlines()
             self._make_label_mapping()
             self.nspk = len(self.spk2utt)
-
-        self.rir_scp = rir_scp
 
         self.noise_apply_prob = noise_apply_prob
         self.short_noise_thres = short_noise_thres
@@ -2123,10 +2235,10 @@ class SpkPreprocessor(CommonPreprocessor):
 
         return data
 
+    @typechecked
     def __call__(
         self, uid: str, data: Dict[str, Union[str, np.ndarray]]
     ) -> Dict[str, np.ndarray]:
-        assert check_argument_types()
 
         data = self._text_process(data)
         data = self._speech_process(data)
@@ -2138,18 +2250,18 @@ class S2TPreprocessor(CommonPreprocessor):
     def __init__(
         self,
         train: bool,
-        token_type: str = None,
+        token_type: Optional[str] = None,
         token_list: Union[Path, str, Iterable[str]] = None,
         bpemodel: Union[Path, str, Iterable[str]] = None,
         text_cleaner: Collection[str] = None,
-        g2p_type: str = None,
+        g2p_type: Optional[str] = None,
         unk_symbol: str = "<unk>",
         space_symbol: str = "<space>",
         non_linguistic_symbols: Union[Path, str, Iterable[str]] = None,
-        delimiter: str = None,
-        rir_scp: str = None,
+        delimiter: Optional[str] = None,
+        rir_scp: Optional[str] = None,
         rir_apply_prob: float = 1.0,
-        noise_scp: str = None,
+        noise_scp: Optional[str] = None,
         noise_apply_prob: float = 1.0,
         noise_db_range: str = "3_10",
         short_noise_thres: float = 0.5,
@@ -2205,10 +2317,10 @@ class S2TPreprocessor(CommonPreprocessor):
         self.first_time = self.token_id_converter.token2id[first_time_symbol]
         self.last_time = self.token_id_converter.token2id[last_time_symbol]
 
+    @typechecked
     def _pad_or_trim_speech(
         self, data: Dict[str, Union[str, np.ndarray]]
     ) -> Tuple[Dict[str, Union[str, np.ndarray]], int]:
-        assert check_argument_types()
 
         init_pad = 0
         if self.speech_name in data:
@@ -2238,13 +2350,12 @@ class S2TPreprocessor(CommonPreprocessor):
 
             data[self.speech_name] = speech.T  # convert back to time first
 
-        assert check_return_type((data, init_pad))
         return data, init_pad
 
+    @typechecked
     def _text_process(
         self, data: Dict[str, Union[str, np.ndarray]], time_shift: int
     ) -> Dict[str, np.ndarray]:
-        assert check_argument_types()
 
         text_names = [self.text_name, self.text_prev_name, self.text_ctc_name]
         if self.tokenizer is not None:
@@ -2295,13 +2406,12 @@ class S2TPreprocessor(CommonPreprocessor):
 
                     data[name] = text_ints
 
-        assert check_return_type(data)
         return data
 
+    @typechecked
     def __call__(
         self, uid: str, data: Dict[str, Union[str, np.ndarray]]
     ) -> Dict[str, np.ndarray]:
-        assert check_argument_types()
 
         data = self._speech_process(data)
         data, init_pad = self._pad_or_trim_speech(data)
@@ -2309,3 +2419,363 @@ class S2TPreprocessor(CommonPreprocessor):
         data = self._text_process(data, round(init_pad / self.speech_resolution))
 
         return data
+
+
+class S2TCTCPreprocessor(CommonPreprocessor):
+    """Preprocessor for OWSM-CTC."""
+
+    def __init__(
+        self,
+        train: bool,
+        token_type: str = None,
+        token_list: Union[Path, str, Iterable[str]] = None,
+        bpemodel: Union[Path, str, Iterable[str]] = None,
+        text_cleaner: Collection[str] = None,
+        g2p_type: str = None,
+        unk_symbol: str = "<unk>",
+        space_symbol: str = "<space>",
+        non_linguistic_symbols: Union[Path, str, Iterable[str]] = None,
+        delimiter: str = None,
+        rir_scp: str = None,
+        rir_apply_prob: float = 1.0,
+        noise_scp: str = None,
+        noise_apply_prob: float = 1.0,
+        noise_db_range: str = "3_10",
+        short_noise_thres: float = 0.5,
+        speech_volume_normalize: float = None,
+        speech_name: str = "speech",
+        text_name: str = "text",
+        text_prev_name: str = "text_prev",
+        text_ctc_name: str = "text_ctc",
+        fs: int = 16000,
+        na_symbol: str = "<na>",  # text is not available e.g. for prev or ctc
+        speech_length: float = 30,  # pad or trim speech to this value in seconds
+        speech_init_silence: float = 1.0,  # max silence before speech for data aug
+        text_prev_apply_prob: float = 0.5,  # whether to condition on text_prev
+        lang_apply_prob: float = 0.5,  # whether to use groundtruth language or unknown
+        nolang_symbol: str = "<nolang>",
+    ):
+        super().__init__(
+            train=train,
+            token_type=token_type,
+            token_list=token_list,
+            bpemodel=bpemodel,
+            text_cleaner=text_cleaner,
+            g2p_type=g2p_type,
+            unk_symbol=unk_symbol,
+            space_symbol=space_symbol,
+            non_linguistic_symbols=non_linguistic_symbols,
+            delimiter=delimiter,
+            rir_scp=rir_scp,
+            rir_apply_prob=rir_apply_prob,
+            noise_scp=noise_scp,
+            noise_apply_prob=noise_apply_prob,
+            noise_db_range=noise_db_range,
+            short_noise_thres=short_noise_thres,
+            speech_volume_normalize=speech_volume_normalize,
+            speech_name=speech_name,
+            text_name=text_name,
+            fs=fs,
+        )
+        self.text_prev_name = text_prev_name
+        self.text_ctc_name = text_ctc_name
+        self.speech_length = int(speech_length * fs)
+        self.speech_init_silence = int(speech_init_silence * fs)
+        self.text_prev_apply_prob = text_prev_apply_prob
+        self.lang_apply_prob = lang_apply_prob
+
+        # Obtain the token id of special tokens
+        self.na_symbol = na_symbol
+        self.nolang = self.token_id_converter.token2id[nolang_symbol]
+
+    @typechecked
+    def _pad_or_trim_speech(
+        self, data: Dict[str, Union[str, np.ndarray]]
+    ) -> Tuple[Dict[str, Union[str, np.ndarray]], int]:
+
+        init_pad = 0
+        if self.speech_name in data:
+            speech = data[self.speech_name]
+
+            # speech: (Nmic, Time)
+            if speech.ndim == 1:
+                speech = speech[None, :]
+            else:
+                speech = speech.T
+
+            # Add silence to the left
+            if self.train and speech.shape[-1] < self.speech_length:
+                init_pad = np.random.randint(
+                    min(self.speech_length - speech.shape[-1], self.speech_init_silence)
+                    + 1
+                )
+                speech = np.pad(speech, ((0, 0), (init_pad, 0)))
+
+            # Pad or trim to max_samples
+            if speech.shape[-1] < self.speech_length:
+                speech = np.pad(
+                    speech, ((0, 0), (0, self.speech_length - speech.shape[-1]))
+                )
+            else:
+                speech = speech[:, : self.speech_length]
+
+            data[self.speech_name] = speech.T  # convert back to time first
+
+        return data, init_pad
+
+    @typechecked
+    def _text_process(
+        self, data: Dict[str, Union[str, np.ndarray]]
+    ) -> Dict[str, np.ndarray]:
+
+        # NOTE: the order is important
+        text_names = [self.text_name, self.text_prev_name, self.text_ctc_name]
+        if self.tokenizer is not None:
+            for name in text_names:
+                if name in data:
+                    text = data[name]
+
+                    # Remove prev text by setting it to <na>
+                    if (
+                        self.train
+                        and name == self.text_prev_name
+                        and np.random.uniform() > self.text_prev_apply_prob
+                    ):
+                        text = self.na_symbol
+
+                    text = self.text_cleaner(text)
+                    tokens = self.tokenizer.text2tokens(text)
+                    text_ints = self.token_id_converter.tokens2ids(tokens)
+                    text_ints = np.array(text_ints, dtype=np.int64)
+
+                    # Augment text
+                    if name == self.text_name:
+                        # NOTE(yifan): The first token is always space
+                        # which should be removed.
+                        # No space is allowed between special tokens.
+                        # This works for bpe, but maybe not for the other types.
+                        text_ints = text_ints[1:]
+
+                        # First two tokens are <lang> and <task>
+                        # NOTE: must copy the array
+                        data["prefix"] = copy.deepcopy(text_ints[:2])
+                        if self.train and np.random.uniform() > self.lang_apply_prob:
+                            data["prefix"][0] = self.nolang
+
+                    elif name == self.text_ctc_name:
+                        # Add <lang> and <task> to ASR Text as well
+                        text_ints = np.concatenate(
+                            [data[self.text_name][:2], text_ints]
+                        )
+
+                    elif name == self.text_prev_name:
+                        # Remove space before <na>
+                        if text == self.na_symbol:
+                            assert len(text_ints) == 2, text_ints
+                            text_ints = text_ints[1:]
+
+                    data[name] = text_ints
+
+        return data
+
+    @typechecked
+    def __call__(
+        self, uid: str, data: Dict[str, Union[str, np.ndarray]]
+    ) -> Dict[str, np.ndarray]:
+
+        data = self._speech_process(data)
+        data, _ = self._pad_or_trim_speech(data)
+
+        data = self._text_process(data)
+
+        return data
+
+
+class SpeechLMPreprocessor(AbsPreprocessor):
+    """Preprocessor specifically for SpeechLM models"""
+
+    def __init__(
+        self,
+        token_list: List,
+        token_bias: Dict,
+        encoder_decoder_format: bool = False,
+        # codec related:
+        codec_token_per_frame: int = 1,
+        codec_token_in_use: int = None,
+        # tokenizer related: Phone & BPE
+        unk_symbol: str = "<unk>",
+        space_symbol: str = "<space>",
+        non_linguistic_symbols: Union[Path, str, Iterable[str]] = None,
+        g2p_type: str = None,
+        bpemodel: Union[Path, str, Iterable[str]] = None,
+        bpe_encode_kwargs: Dict = None,
+        text_cleaner: str = None,
+        # speaker prompt
+        speaker_prompt_length: int = 1800,
+    ):
+        self.token_list = token_list
+        self.token_bias = token_bias
+        self.encoder_decoder_format = encoder_decoder_format
+
+        self.modalities = speechlm_definitions.modalities
+        self.tasks = speechlm_definitions.tasks
+
+        self.converter = TokenIDConverter(
+            token_list=token_list,
+            unk_symbol=unk_symbol,
+        )
+        self.text_cleaner = TextCleaner(text_cleaner)
+
+        # Modality-specific utilities
+
+        # Text BPE (text_bpe):
+        if bpemodel is not None:
+            if bpe_encode_kwargs is None:
+                bpe_encode_kwargs = Dict()
+            self.bpe = build_tokenizer(
+                token_type="bpe",
+                bpemodel=bpemodel,
+                encode_kwargs=bpe_encode_kwargs,
+            )
+        else:
+            self.bpe = None
+
+        # Phones (g2p):
+        if g2p_type is not None:
+            self.g2p = build_tokenizer(
+                token_type="phn",
+                space_symbol=space_symbol,
+                non_linguistic_symbols=non_linguistic_symbols,
+                g2p_type=g2p_type,
+            )
+        else:
+            self.g2p = None
+
+        # Codec model (codec):
+        self.codec_token_per_frame = codec_token_per_frame
+        if codec_token_in_use is None:
+            codec_token_in_use = codec_token_per_frame
+            assert codec_token_in_use <= codec_token_per_frame
+        self.codec_token_in_use = codec_token_in_use
+
+        # speaker prompt
+        self.speaker_prompt_length = speaker_prompt_length
+
+    @typechecked
+    def __call__(
+        self, uid: str, data: Dict[str, Union[str, np.ndarray]]
+    ) -> Dict[str, np.ndarray]:
+
+        # (1) task parsing
+        task_name = uid.strip().split(" ")[0]
+        task = self.tasks[task_name]
+
+        # (Jinchuan): Temp code
+        for e in task.encoder_entries + task.decoder_entries:
+            if not self.modalities[e[1]].discrete:
+                raise ValueError("Continuous feature is not supported yet.")
+
+        # (2) encoder & decoder sequence
+        seqs, conti_feats = [], []  # noqa
+        n_enc_entries = len(task.encoder_entries)
+        for e_idx, entries in enumerate([task.encoder_entries, task.decoder_entries]):
+            for entry in entries:
+                name, modality, _ = entry
+
+                value, _ = self.modality_specific_processing(data[name], modality)
+                seqs.append(value)
+
+        # (3) splice
+        sos_eos = self.special_token("<sos/eos>")
+        if task.use_task_identifier:
+            task_identifier = f"<{task_name}_task>"
+        else:
+            task_identifier = "<unkown_task_identifer>"
+        task_identifier = self.special_token(task_identifier)
+
+        new_data = {}
+        if self.encoder_decoder_format:
+            new_data["enc_seq"] = np.concatenate(
+                [sos_eos] + [task_identifier] + seqs[:n_enc_entries] + [sos_eos], axis=0
+            ).reshape(-1, self.codec_token_in_use)
+            new_data["dec_seq"] = np.concatenate(
+                [sos_eos] + seqs[n_enc_entries:] + [sos_eos], axis=0
+            ).reshape(-1, self.codec_token_in_use)
+        else:
+            new_data["dec_seq"] = np.concatenate(
+                [sos_eos] + [task_identifier] + seqs + [sos_eos], axis=0
+            ).reshape(-1, self.codec_token_in_use)
+
+        prefix_len = (
+            len(new_data["dec_seq"]) - len(seqs[-1]) // self.codec_token_in_use - 1
+        )
+        new_data["prefix_len"] = np.array([prefix_len])
+        # self.diagnose(new_data) # For debug. Enable this to check the sequence format
+
+        return new_data
+
+    def special_token(self, token):
+        token_idx = self.token_list.index(token)
+        token_idx = np.array([token_idx]).repeat(self.codec_token_in_use, axis=0)
+        return token_idx
+
+    def modality_specific_processing(self, value, modality):
+
+        if modality in ["codec", "spk"]:
+            value = value.reshape(-1, self.codec_token_per_frame)
+            value = value[:, : self.codec_token_in_use]
+            value = value + self.token_bias["codec"]
+
+            if modality == "spk":
+                if len(value) <= self.speaker_prompt_length:
+                    pad_len = self.speaker_prompt_length - len(value)
+                    pad = np.tile(self.special_token("<pad>"), (pad_len, 1))
+                    value = np.concatenate([value, pad])
+                else:
+                    start = random.randint(
+                        0, len(value) - self.speaker_prompt_length - 1
+                    )
+                    value = value[start : start + self.speaker_prompt_length]
+
+            value = value.flatten()
+            conti_feat = None
+
+        # Other discrete modalities
+        elif modality in ["ssl", "text_bpe", "g2p"]:
+
+            if modality in ["text_bpe", "g2p"]:
+                value = self.text_cleaner(value)
+                tokenizer = self.bpe if modality == "text_bpe" else self.g2p
+                value = tokenizer.text2tokens(value)
+                value = self.converter.tokens2ids(value)
+                value = np.array(value)
+
+            elif modality in ["ssl"]:
+                value = value + self.token_bias["ssl"]
+
+            value = value.repeat(self.codec_token_in_use, axis=0)
+            conti_feat = None
+
+        # TODO(Jinchuan): Support continuous modalities
+        else:
+            raise NotImplementedError
+
+        modality_idx = self.special_token(f"<{modality}_start/end>")
+        value = np.concatenate([modality_idx, value])
+
+        return value, conti_feat
+
+    def diagnose(self, data):
+        """Only for debug"""
+        enc_seq = data.get("enc_seq", None)
+        dec_seq = data.get("dec_seq", None)
+
+        logging.warning("Diagnose in preprocessor ...")
+        for name, seq in [("encoder", enc_seq), ("decoder", dec_seq)]:
+            if seq is None:
+                continue
+            logging.warning(f"{name} ...")
+            for idx, patch in enumerate(seq):
+                patch = patch.tolist()
+                patch_str = ", ".join(self.converter.ids2tokens(patch))
+                logging.warning(f"Patch: {idx} -> {patch_str}")

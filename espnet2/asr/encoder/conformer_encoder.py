@@ -7,7 +7,7 @@ import logging
 from typing import List, Optional, Tuple, Union
 
 import torch
-from typeguard import check_argument_types
+from typeguard import typechecked
 
 from espnet2.asr.ctc import CTC
 from espnet2.asr.encoder.abs_encoder import AbsEncoder
@@ -24,6 +24,7 @@ from espnet.nets.pytorch_backend.transformer.attention import (
     RelPositionMultiHeadedAttention,
 )
 from espnet.nets.pytorch_backend.transformer.embedding import (
+    ConvolutionalPositionalEmbedding,
     LegacyRelPositionalEncoding,
     PositionalEncoding,
     RelPositionalEncoding,
@@ -84,6 +85,7 @@ class ConformerEncoder(AbsEncoder):
 
     """
 
+    @typechecked
     def __init__(
         self,
         input_size: int,
@@ -114,8 +116,9 @@ class ConformerEncoder(AbsEncoder):
         stochastic_depth_rate: Union[float, List[float]] = 0.0,
         layer_drop_rate: float = 0.0,
         max_pos_emb_len: int = 5000,
+        qk_norm: bool = False,
+        use_flash_attn: bool = True,
     ):
-        assert check_argument_types()
         super().__init__()
         self._output_size = output_size
 
@@ -133,6 +136,8 @@ class ConformerEncoder(AbsEncoder):
         activation = get_activation(activation_type)
         if pos_enc_layer_type == "abs_pos":
             pos_enc_class = PositionalEncoding
+        elif pos_enc_layer_type == "conv":
+            pos_enc_class = ConvolutionalPositionalEmbedding
         elif pos_enc_layer_type == "scaled_abs_pos":
             pos_enc_class = ScaledPositionalEncoding
         elif pos_enc_layer_type == "rel_pos":
@@ -234,11 +239,27 @@ class ConformerEncoder(AbsEncoder):
             raise NotImplementedError("Support only linear or conv1d.")
 
         if selfattention_layer_type == "selfattn":
+            # Default to flash attention unless overrided by user
+            if use_flash_attn:
+                try:
+                    from espnet2.torch_utils.get_flash_attn_compatability import (
+                        is_flash_attn_supported,
+                    )
+
+                    use_flash_attn = is_flash_attn_supported()
+                    import flash_attn  # noqa
+                except Exception:
+                    use_flash_attn = False
+
             encoder_selfattn_layer = MultiHeadedAttention
             encoder_selfattn_layer_args = (
                 attention_heads,
                 output_size,
                 attention_dropout_rate,
+                qk_norm,
+                use_flash_attn,
+                False,
+                False,
             )
         elif selfattention_layer_type == "legacy_rel_selfattn":
             assert pos_enc_layer_type == "legacy_rel_pos"
@@ -308,6 +329,7 @@ class ConformerEncoder(AbsEncoder):
         xs_pad: torch.Tensor,
         ilens: torch.Tensor,
         prev_states: torch.Tensor = None,
+        masks: torch.Tensor = None,
         ctc: CTC = None,
         return_all_hs: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
@@ -326,7 +348,10 @@ class ConformerEncoder(AbsEncoder):
             torch.Tensor: Not to be used now.
 
         """
-        masks = (~make_pad_mask(ilens)[:, None, :]).to(xs_pad.device)
+        if masks is None:
+            masks = (~make_pad_mask(ilens)[:, None, :]).to(xs_pad.device)
+        else:
+            masks = ~masks[:, None, :]
 
         if (
             isinstance(self.embed, Conv2dSubsampling)

@@ -1,8 +1,9 @@
 import logging
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
-from typeguard import check_argument_types
+from typeguard import typechecked
 
 
 class CTC(torch.nn.Module):
@@ -18,6 +19,7 @@ class CTC(torch.nn.Module):
         zero_infinity:  Whether to zero infinite losses and the associated gradients.
     """
 
+    @typechecked
     def __init__(
         self,
         odim: int,
@@ -25,13 +27,12 @@ class CTC(torch.nn.Module):
         dropout_rate: float = 0.0,
         ctc_type: str = "builtin",
         reduce: bool = True,
-        ignore_nan_grad: bool = None,
+        ignore_nan_grad: Optional[bool] = None,
         zero_infinity: bool = True,
         brctc_risk_strategy: str = "exp",
         brctc_group_strategy: str = "end",
         brctc_risk_factor: float = 0.0,
     ):
-        assert check_argument_types()
         super().__init__()
         eprojs = encoder_output_size
         self.dropout_rate = dropout_rate
@@ -56,7 +57,7 @@ class CTC(torch.nn.Module):
 
         elif self.ctc_type == "brctc":
             try:
-                import k2
+                import k2  # noqa
             except ImportError:
                 raise ImportError("You should install K2 to use Bayes Risk CTC")
 
@@ -73,7 +74,7 @@ class CTC(torch.nn.Module):
 
     def loss_fn(self, th_pred, th_target, th_ilen, th_olen) -> torch.Tensor:
         if self.ctc_type == "builtin" or self.ctc_type == "brctc":
-            th_pred = th_pred.log_softmax(2)
+            th_pred = th_pred.log_softmax(2).float()
             loss = self.ctc_loss(th_pred, th_target, th_ilen, th_olen)
             if self.ctc_type == "builtin":
                 size = th_pred.size(1)
@@ -90,7 +91,7 @@ class CTC(torch.nn.Module):
         # builtin2 ignores nan losses using the logic below, while
         # builtin relies on the zero_infinity flag in pytorch CTC
         elif self.ctc_type == "builtin2":
-            th_pred = th_pred.log_softmax(2)
+            th_pred = th_pred.log_softmax(2).float()
             loss = self.ctc_loss(th_pred, th_target, th_ilen, th_olen)
 
             if loss.requires_grad and self.ignore_nan_grad:

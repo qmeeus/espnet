@@ -1,3 +1,5 @@
+"""RNN Encoder module."""
+
 import logging
 
 import numpy as np
@@ -10,7 +12,7 @@ from espnet.nets.pytorch_backend.nets_utils import make_pad_mask, to_device
 
 
 class RNNP(torch.nn.Module):
-    """RNN with projection layer module
+    """RNN with projection layer module.
 
     :param int idim: dimension of inputs
     :param int elayers: number of encoder layers
@@ -22,6 +24,7 @@ class RNNP(torch.nn.Module):
     """
 
     def __init__(self, idim, elayers, cdim, hdim, subsample, dropout, typ="blstm"):
+        """Initialize RNNP."""
         super(RNNP, self).__init__()
         bidir = typ[0] == "b"
         for i in range(elayers):
@@ -47,7 +50,7 @@ class RNNP(torch.nn.Module):
         self.dropout = dropout
 
     def forward(self, xs_pad, ilens, prev_state=None):
-        """RNNP forward
+        """Calculate RNNP forward propagation.
 
         :param torch.Tensor xs_pad: batch of padded input sequences (B, Tmax, idim)
         :param torch.Tensor ilens: batch of lengths of input sequences (B)
@@ -87,7 +90,7 @@ class RNNP(torch.nn.Module):
 
 
 class RNN(torch.nn.Module):
-    """RNN module
+    """RNN module.
 
     :param int idim: dimension of inputs
     :param int elayers: number of encoder layers
@@ -98,6 +101,7 @@ class RNN(torch.nn.Module):
     """
 
     def __init__(self, idim, elayers, cdim, hdim, dropout, typ="blstm"):
+        """Initialize RNN."""
         super(RNN, self).__init__()
         bidir = typ[0] == "b"
         self.nbrnn = (
@@ -126,7 +130,7 @@ class RNN(torch.nn.Module):
         self.typ = typ
 
     def forward(self, xs_pad, ilens, prev_state=None):
-        """RNN forward
+        """Forward RNN.
 
         :param torch.Tensor xs_pad: batch of padded input sequences (B, Tmax, D)
         :param torch.Tensor ilens: batch of lengths of input sequences (B)
@@ -158,7 +162,7 @@ class RNN(torch.nn.Module):
 
 
 def reset_backward_rnn_state(states):
-    """Sets backward BRNN states to zeroes
+    """Set backward BRNN states to zeroes.
 
     Useful in processing of sliding windows over the inputs
     """
@@ -171,12 +175,13 @@ def reset_backward_rnn_state(states):
 
 
 class VGG2L(torch.nn.Module):
-    """VGG-like module
+    """VGG-like module.
 
     :param int in_channel: number of input channels
     """
 
     def __init__(self, in_channel=1):
+        """Initialize VGG2L."""
         super(VGG2L, self).__init__()
         # CNN layer (VGG motivated)
         self.conv1_1 = torch.nn.Conv2d(in_channel, 64, 3, stride=1, padding=1)
@@ -187,7 +192,7 @@ class VGG2L(torch.nn.Module):
         self.in_channel = in_channel
 
     def forward(self, xs_pad, ilens, **kwargs):
-        """VGG2L forward
+        """Forward VGG2L.
 
         :param torch.Tensor xs_pad: batch of padded input sequences (B, Tmax, D)
         :param torch.Tensor ilens: batch of lengths of input sequences (B)
@@ -233,7 +238,7 @@ class VGG2L(torch.nn.Module):
 
 
 class Encoder(torch.nn.Module):
-    """Encoder module
+    """Encoder module.
 
     :param str etype: type of encoder network
     :param int idim: number of dimensions of encoder network
@@ -248,6 +253,7 @@ class Encoder(torch.nn.Module):
     def __init__(
         self, etype, idim, elayers, eunits, eprojs, subsample, dropout, in_channel=1
     ):
+        """Initialize Encoder."""
         super(Encoder, self).__init__()
         typ = etype.lstrip("vgg").rstrip("p")
         if typ not in ["lstm", "gru", "blstm", "bgru"]:
@@ -300,7 +306,7 @@ class Encoder(torch.nn.Module):
             self.conv_subsampling_factor = 1
 
     def forward(self, xs_pad, ilens, prev_states=None):
-        """Encoder forward
+        """Forward Encoder.
 
         :param torch.Tensor xs_pad: batch of padded input sequences (B, Tmax, D)
         :param torch.Tensor ilens: batch of lengths of input sequences (B)
@@ -324,7 +330,7 @@ class Encoder(torch.nn.Module):
 
 
 def encoder_for(args, idim, subsample):
-    """Instantiates an encoder module given the program arguments
+    """Instantiate an encoder module given the program arguments.
 
     :param Namespace args: The arguments
     :param int or List of integer idim: dimension of input, e.g. 83, or

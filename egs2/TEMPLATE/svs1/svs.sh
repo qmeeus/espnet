@@ -13,34 +13,34 @@ log() {
     echo -e "$(date '+%Y-%m-%dT%H:%M:%S') (${fname}:${BASH_LINENO[0]}:${FUNCNAME[1]}) $*"
 }
 min() {
-  local a b
-  a=$1
-  for b in "$@"; do
-      if [ "${b}" -le "${a}" ]; then
-          a="${b}"
-      fi
-  done
-  echo "${a}"
+    local a b
+    a=$1
+    for b in "$@"; do
+        if [ "${b}" -le "${a}" ]; then
+            a="${b}"
+        fi
+    done
+    echo "${a}"
 }
 SECONDS=0
 
 # General configuration
-stage=1              # Processes starts from the specified stage.
-stop_stage=10000     # Processes is stopped at the specified stage.
-skip_data_prep=false # Skip data preparation stages.
-skip_train=false     # Skip training stages.
-skip_eval=false      # Skip decoding and evaluation stages.
-skip_upload=true     # Skip packing and uploading stages.
-skip_upload_hf=true  # Skip uploading to hugging face stages.
-ngpu=1               # The number of gpus ("0" uses cpu, otherwise use gpu).
-gpu_id=0             # GPU_id, only works when ngpu=1
-num_nodes=1          # The number of nodes.
-nj=32                # The number of parallel jobs.
-inference_nj=32      # The number of parallel jobs in decoding.
-gpu_inference=false  # Whether to perform gpu decoding.
-dumpdir=dump         # Directory to dump features.
-expdir=exp           # Directory to save experiments.
-python=python3       # Specify python to execute espnet2 commands.
+stage=1                 # Processes starts from the specified stage.
+stop_stage=10000        # Processes is stopped at the specified stage.
+skip_data_prep=false    # Skip data preparation stages.
+skip_train=false        # Skip training stages.
+skip_eval=false         # Skip decoding and evaluation stages.
+skip_packing=true       # Skip the packing stage.
+skip_upload_hf=true     # Skip uploading to huggingface stage.
+ngpu=1                  # The number of gpus ("0" uses cpu, otherwise use gpu).
+gpu_id=0                # GPU_id, only works when ngpu=1
+num_nodes=1             # The number of nodes.
+nj=32                   # The number of parallel jobs.
+inference_nj=32         # The number of parallel jobs in decoding.
+gpu_inference=false     # Whether to perform gpu decoding.
+dumpdir=dump            # Directory to dump features.
+expdir=exp              # Directory to save experiments.
+python=python3          # Specify python to execute espnet2 commands.
 
 # Data preparation related
 local_data_opts="" # Options to be passed to local/data.sh.
@@ -68,7 +68,7 @@ pitch_extract=None
 ying_extract=None
 # Only used for the model using pitch features (e.g. FastSpeech2)
 f0min=80          # Maximum f0 for pitch extraction.
-f0max=800         # Minimum f0 for pitch extraction.
+f0max=810         # Minimum f0 for pitch extraction.
 
 oov="<unk>"         # Out of vocabrary symbol.
 blank="<blank>"     # CTC blank symbol.
@@ -85,8 +85,8 @@ num_splits=1       # Number of splitting for svs corpus.
 teacher_dumpdir="" # Directory of teacher outpus
 write_collected_feats=false # Whether to dump features in stats collection.
 svs_task=svs                # SVS task (svs or gan_svs)
-pretrained_model=              # Pretrained model to load
-ignore_init_mismatch=false      # Ignore initial mismatch
+pretrained_model=           # Pretrained model to load
+ignore_init_mismatch=false  # Ignore initial mismatch
 
 # Decoding related
 inference_config="" # Config for decoding.
@@ -94,49 +94,55 @@ inference_args=""   # Arguments for decoding, e.g., "--threshold 0.75".
                     # Note that it will overwrite args in inference config.
 inference_tag=""    # Suffix for decoding directory.
 inference_model=valid.loss.best.pth # Model path for decoding.
-                                   # e.g.
-                                   # inference_model=train.loss.best.pth
-                                   # inference_model=3epoch.pth
-                                   # inference_model=valid.acc.best.pth
-                                   # inference_model=valid.loss.ave.pth
-vocoder_file=none  # Vocoder parameter file, If set to none, Griffin-Lim will be used.
-download_model=""   # Download a model from Model Zoo and use it for decoding.
+                                    # e.g.
+                                    # inference_model=train.loss.best.pth
+                                    # inference_model=3epoch.pth
+                                    # inference_model=valid.acc.best.pth
+                                    # inference_model=valid.loss.ave.pth
+vocoder_file=none # Vocoder parameter file, If set to none, Griffin-Lim will be used.
+download_model="" # Download a model from Model Zoo and use it for decoding.
+
+# evaluation related
+skip_versa=false
+versa_config=../../TEMPLATE/svs1/conf/versa.yaml
 
 # [Task dependent] Set the datadir name created by local/data.sh
-train_set=""     # Name of training set.
-valid_set=""     # Name of validation set used for monitoring/tuning network training.
-test_sets=""     # Names of test sets. Multiple items (e.g., both dev and eval sets) can be specified.
-srctexts=""      # Texts to create token list. Multiple items can be specified.
-nlsyms_txt=none  # Non-linguistic symbol list (needed if existing).
-token_type=phn   # Transcription type.
-cleaner=none     # Text cleaner.
-g2p=g2p_en       # g2p method (needed if token_type=phn).
-lang=noinfo      # The language type of corpus.
-text_fold_length=150   # fold_length for text data.
-singing_fold_length=800 # fold_length for singing data.
+train_set=""             # Name of training set.
+valid_set=""             # Name of validation set used for monitoring/tuning network training.
+test_sets=""             # Names of test sets. Multiple items (e.g., both dev and eval sets) can be specified.
+srctexts=""              # Texts to create token list. Multiple items can be specified.
+nlsyms_txt=none          # Non-linguistic symbol list (needed if existing).
+token_type=phn           # Transcription type.
+cleaner=none             # Text cleaner.
+g2p=g2p_en               # g2p method (needed if token_type=phn).
+lang=noinfo              # The language type of corpus.
+text_fold_length=150     # fold_length for text data.
+singing_fold_length=800  # fold_length for singing data.
 
 # Upload model related
 hf_repo=
 
-help_message=$(cat << EOF
+help_message=$(
+    cat <<EOF
 Usage: $0 --train-set "<train_set_name>" --valid-set "<valid_set_name>" --test_sets "<test_set_names>" --srctexts "<srctexts>"
 
 Options:
     # General configuration
-    --stage          # Processes starts from the specified stage (default="${stage}").
-    --stop_stage     # Processes is stopped at the specified stage (default="${stop_stage}").
-    --skip_data_prep # Skip data preparation stages (default="${skip_data_prep}").
-    --skip_train     # Skip training stages (default="${skip_train}").
-    --skip_eval      # Skip decoding and evaluation stages (default="${skip_eval}").
-    --skip_upload    # Skip packing and uploading stages (default="${skip_upload}").
-    --ngpu           # The number of gpus ("0" uses cpu, otherwise use gpu, default="${ngpu}").
-    --num_nodes      # The number of nodes (default="${num_nodes}").
-    --nj             # The number of parallel jobs (default="${nj}").
-    --inference_nj   # The number of parallel jobs in decoding (default="${inference_nj}").
-    --gpu_inference  # Whether to perform gpu decoding (default="${gpu_inference}").
-    --dumpdir        # Directory to dump features (default="${dumpdir}").
-    --expdir         # Directory to save experiments (default="${expdir}").
-    --python         # Specify python to execute espnet2 commands (default="${python}").
+    --stage              # Processes starts from the specified stage (default="${stage}").
+    --stop_stage         # Processes is stopped at the specified stage (default="${stop_stage}").
+    --skip_data_prep     # Skip data preparation stages (default="${skip_data_prep}").
+    --skip_train         # Skip training stages (default="${skip_train}").
+    --skip_eval          # Skip decoding and evaluation stages (default="${skip_eval}").
+    --skip_packing       # Skip the packing stage (default="${skip_packing}").
+    --skip_upload_hf     # Skip uploading to huggingface stage (default="${skip_upload_hf}").
+    --ngpu               # The number of gpus ("0" uses cpu, otherwise use gpu, default="${ngpu}").
+    --num_nodes          # The number of nodes (default="${num_nodes}").
+    --nj                 # The number of parallel jobs (default="${nj}").
+    --inference_nj       # The number of parallel jobs in decoding (default="${inference_nj}").
+    --gpu_inference      # Whether to perform gpu decoding (default="${gpu_inference}").
+    --dumpdir            # Directory to dump features (default="${dumpdir}").
+    --expdir             # Directory to save experiments (default="${expdir}").
+    --python             # Specify python to execute espnet2 commands (default="${python}").
 
     # Data prep related
     --local_data_opts # Options to be passed to local/data.sh (default="${local_data_opts}").
@@ -304,7 +310,6 @@ if [ -z "${svs_exp}" ]; then
     svs_exp="${expdir}/svs_${tag}"
 fi
 
-
 # ========================== Main stages start from here. ==========================
 
 if ! "${skip_data_prep}"; then
@@ -313,8 +318,6 @@ if ! "${skip_data_prep}"; then
         # [Task dependent] Need to create data.sh for new corpus
         local/data.sh ${local_data_opts} --fs "${fs}" --g2p "${g2p}"
     fi
-
-
 
     if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
         # TODO(kamo): Change kaldi-ark to npy or HDF5?
@@ -328,7 +331,7 @@ if ! "${skip_data_prep}"; then
 
         if [ "${feats_type}" = raw ]; then
             log "Stage 2: Format wav.scp: data/ -> ${data_feats}/"
-            for dset in "${train_set}" "${valid_set}" ${test_sets} ; do
+            for dset in "${train_set}" "${valid_set}" ${test_sets}; do
                 if [ "${dset}" = "${train_set}" ] || [ "${dset}" = "${valid_set}" ]; then
                     _suf="/org"
                 else
@@ -378,20 +381,19 @@ if ! "${skip_data_prep}"; then
                 if [ "${dset}" = "${train_set}" ]; then
                     # Make spk2sid
                     # NOTE(kan-bayashi): 0 is reserved for unknown speakers
-                    echo "<unk> 0" > "${data_feats}${_suf}/${dset}/spk2sid"
-                    cut -f 2 -d " " "${data_feats}${_suf}/${dset}/utt2spk" | sort | uniq | \
-                        awk '{print $1 " " NR}' >> "${data_feats}${_suf}/${dset}/spk2sid"
+                    echo "<unk> 0" >"${data_feats}${_suf}/${dset}/spk2sid"
+                    cut -f 2 -d " " "${data_feats}${_suf}/${dset}/utt2spk" | sort | uniq |
+                        awk '{print $1 " " NR}' >>"${data_feats}${_suf}/${dset}/spk2sid"
                 fi
                 pyscripts/utils/utt2spk_to_utt2sid.py \
                     "${data_feats}/org/${train_set}/spk2sid" \
                     "${data_feats}${_suf}/${dset}/utt2spk" \
-                    > "${data_feats}${_suf}/${dset}/utt2sid"
+                    >"${data_feats}${_suf}/${dset}/utt2sid"
 
-		utt_extra_files="${utt_extra_files} utt2sid"
+                utt_extra_files="${utt_extra_files} utt2sid"
             done
         fi
     fi
-
 
     if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
         if "${use_lid}"; then
@@ -416,7 +418,7 @@ if ! "${skip_data_prep}"; then
                     "${data_feats}${_suf}/${dset}/utt2lang" \
                     > "${data_feats}${_suf}/${dset}/utt2lid"
 
-		utt_extra_files="${utt_extra_files} utt2lid"
+                utt_extra_files="${utt_extra_files} utt2lid"
             done
         fi
     fi
@@ -440,18 +442,15 @@ if ! "${skip_data_prep}"; then
                 _max_length=$(python3 -c "print(int(${max_wav_duration} * ${_fs}))")
 
                 # utt2num_samples is created by format_wav_scp.sh
-                <"${data_feats}/org/${dset}/utt2num_samples" \
-                    awk -v min_length="${_min_length}" -v max_length="${_max_length}" \
-                        '{ if ($2 > min_length && $2 < max_length ) print $0; }' \
-                        >"${data_feats}/${dset}/utt2num_samples"
-                <"${data_feats}/org/${dset}/wav.scp" \
-                    utils/filter_scp.pl "${data_feats}/${dset}/utt2num_samples"  \
+                awk <"${data_feats}/org/${dset}/utt2num_samples" -v min_length="${_min_length}" -v max_length="${_max_length}" \
+                    '{ if ($2 > min_length && $2 < max_length ) print $0; }' \
+                    >"${data_feats}/${dset}/utt2num_samples"
+                utils/filter_scp.pl <"${data_feats}/org/${dset}/wav.scp" "${data_feats}/${dset}/utt2num_samples" \
                     >"${data_feats}/${dset}/wav.scp"
             fi
 
             # Remove empty text
-            <"${data_feats}/org/${dset}/text" \
-                awk ' { if( NF != 1 ) print $0; } ' >"${data_feats}/${dset}/text"
+            awk <"${data_feats}/org/${dset}/text" ' { if( NF != 1 ) print $0; } ' >"${data_feats}/${dset}/text"
 
             # fix_data_dir.sh leaves only utts which exist in all files
             utils/fix_data_dir.sh --utt_extra_files "${utt_extra_files}" "${data_feats}/${dset}"
@@ -462,7 +461,6 @@ if ! "${skip_data_prep}"; then
         cat ${srctexts} | awk ' { if( NF != 1 ) print $0; } ' >"${data_feats}/srctexts"
     fi
 
-
     if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
         log "Stage 4: Generate token_list from ${srctexts}"
         # "nlsyms_txt" should be generated by local/data.sh if need
@@ -471,15 +469,15 @@ if ! "${skip_data_prep}"; then
         # 0 is reserved for CTC-blank for ASR and also used as ignore-index in the other task
 
         ${python} -m espnet2.bin.tokenize_text \
-              --token_type "${token_type}" -f 2- \
-              --input "${data_feats}/srctexts" --output "${token_list}" \
-              --non_linguistic_symbols "${nlsyms_txt}" \
-              --cleaner "${cleaner}" \
-              --g2p "${g2p}" \
-              --write_vocabulary true \
-              --add_symbol "${blank}:0" \
-              --add_symbol "${oov}:1" \
-              --add_symbol "${sos_eos}:-1"
+            --token_type "${token_type}" -f 2- \
+            --input "${data_feats}/srctexts" --output "${token_list}" \
+            --non_linguistic_symbols "${nlsyms_txt}" \
+            --cleaner "${cleaner}" \
+            --g2p "${g2p}" \
+            --write_vocabulary true \
+            --add_symbol "${blank}:0" \
+            --add_symbol "${oov}:1" \
+            --add_symbol "${sos_eos}:-1"
 
     fi
 else
@@ -568,9 +566,8 @@ if ! "${skip_train}"; then
         _logdir="${svs_stats_dir}/logdir"
         mkdir -p "${_logdir}"
 
-
         # Get the minimum number among ${nj} and the number lines of input files
-        _nj=$(min "${nj}" "$(<${_train_dir}/${_scp} wc -l)" "$(<${_valid_dir}/${_scp} wc -l)")
+        _nj=$(min "${nj}" "$(wc <${_train_dir}/${_scp} -l)" "$(wc <${_valid_dir}/${_scp} -l)")
 
         key_file="${_train_dir}/${_scp}"
         split_scps=""
@@ -590,7 +587,9 @@ if ! "${skip_train}"; then
 
         # 2. Generate run.sh
         log "Generate '${svs_stats_dir}/run.sh'. You can resume the process from stage 5 using this script"
-        mkdir -p "${svs_stats_dir}"; echo "${run_args} --stage 5 \"\$@\"; exit \$?" > "${svs_stats_dir}/run.sh"; chmod +x "${svs_stats_dir}/run.sh"
+        mkdir -p "${svs_stats_dir}"
+        echo "${run_args} --stage 5 \"\$@\"; exit \$?" >"${svs_stats_dir}/run.sh"
+        chmod +x "${svs_stats_dir}/run.sh"
 
         # 3. Submit jobs
         log "SVS collect_stats started... log: '${_logdir}/stats.*.log'"
@@ -620,7 +619,10 @@ if ! "${skip_train}"; then
                 --valid_shape_file "${_logdir}/valid.JOB.scp" \
                 --output_dir "${_logdir}/stats.JOB" \
                 --fs ${fs} \
-                ${_opts} ${train_args} || { cat "${_logdir}"/stats.1.log; exit 1; }
+                ${_opts} ${train_args} || {
+                    cat "${_logdir}"/stats.1.log
+                    exit 1
+                }
 
         # 4. Aggregate shape files
         _opts=
@@ -635,16 +637,12 @@ if ! "${skip_train}"; then
         ${python} -m espnet2.bin.aggregate_stats_dirs ${_opts} --output_dir "${svs_stats_dir}"
 
         # Append the num-tokens at the last dimensions. This is used for batch-bins count
-        <"${svs_stats_dir}/train/text_shape" \
-            awk -v N="$(<${token_list} wc -l)" '{ print $0 "," N }' \
+        awk <"${svs_stats_dir}/train/text_shape" -v N="$(wc <${token_list} -l)" '{ print $0 "," N }' \
             >"${svs_stats_dir}/train/text_shape.${token_type}"
 
-        <"${svs_stats_dir}/valid/text_shape" \
-            awk -v N="$(<${token_list} wc -l)" '{ print $0 "," N }' \
+        awk <"${svs_stats_dir}/valid/text_shape" -v N="$(wc <${token_list} -l)" '{ print $0 "," N }' \
             >"${svs_stats_dir}/valid/text_shape.${token_type}"
     fi
-
-
 
     if [ ${stage} -le 6 ] && [ ${stop_stage} -ge 6 ]; then
         _train_dir="${data_feats}/${train_set}"
@@ -705,13 +703,13 @@ if ! "${skip_train}"; then
                 if [ ! -f "${_split_dir}/.done" ]; then
                     rm -f "${_split_dir}/.done"
                     ${python} -m espnet2.bin.split_scps \
-                      --scps \
-                          "${_train_dir}/text" \
-                          "${_train_dir}/${_scp}" \
-                          "${svs_stats_dir}/train/singing_shape" \
-                          "${svs_stats_dir}/train/text_shape.${token_type}" \
-                      --num_splits "${num_splits}" \
-                      --output_dir "${_split_dir}"
+                        --scps \
+                            "${_train_dir}/text" \
+                            "${_train_dir}/${_scp}" \
+                            "${svs_stats_dir}/train/singing_shape" \
+                            "${svs_stats_dir}/train/text_shape.${token_type}" \
+                        --num_splits "${num_splits}" \
+                        --output_dir "${_split_dir}"
                     touch "${_split_dir}/.done"
                 else
                     log "${_split_dir}/.done exists. Spliting is skipped"
@@ -740,9 +738,9 @@ if ! "${skip_train}"; then
             _opts+="--valid_shape_file ${svs_stats_dir}/valid/text_shape.${token_type} "
             _opts+="--valid_shape_file ${svs_stats_dir}/valid/singing_shape "
         else
-	    log "CASE 2: Non-AR model training (with additional alignment)"
+            log "CASE 2: Non-AR model training (with additional alignment)"
             ##################################################################
-	    #   CASE 2: Non-AR model training  (with additional alignment)   #
+            #   CASE 2: Non-AR model training  (with additional alignment)   #
             ##################################################################
             _teacher_train_dir="${teacher_dumpdir}/${train_set}"
             _teacher_valid_dir="${teacher_dumpdir}/${valid_set}"
@@ -867,12 +865,14 @@ if ! "${skip_train}"; then
         fi
 
         log "Generate '${svs_exp}/run.sh'. You can resume the process from stage 6 using this script"
-        mkdir -p "${svs_exp}"; echo "${run_args} --stage 6 \"\$@\"; exit \$?" > "${svs_exp}/run.sh"; chmod +x "${svs_exp}/run.sh"
+        mkdir -p "${svs_exp}"
+        echo "${run_args} --stage 6 \"\$@\"; exit \$?" >"${svs_exp}/run.sh"
+        chmod +x "${svs_exp}/run.sh"
 
         # NOTE(kamo): --fold_length is used only if --batch_type=folded and it's ignored in the other case
 
         log "SVS training started... log: '${svs_exp}/train.log'"
-        if echo "${cuda_cmd}" | grep -e queue.pl -e queue-freegpu.pl &> /dev/null; then
+        if echo "${cuda_cmd}" | grep -e queue.pl -e queue-freegpu.pl &>/dev/null; then
             # SGE can't include "/" in a job name
             jobname="$(basename ${svs_exp})"
         else
@@ -952,8 +952,9 @@ if ! "${skip_eval}"; then
         fi
 
         log "Generate '${svs_exp}/${inference_tag}/run.sh'. You can resume the process from stage 7 using this script"
-        mkdir -p "${svs_exp}/${inference_tag}"; echo "${run_args} --stage 7 \"\$@\"; exit \$?" > "${svs_exp}/${inference_tag}/run.sh"; chmod +x "${svs_exp}/${inference_tag}/run.sh"
-
+        mkdir -p "${svs_exp}/${inference_tag}"
+        echo "${run_args} --stage 7 \"\$@\"; exit \$?" >"${svs_exp}/${inference_tag}/run.sh"
+        chmod +x "${svs_exp}/${inference_tag}/run.sh"
 
         for dset in ${test_sets}; do
             _data="${data_feats}/${dset}"
@@ -991,14 +992,13 @@ if ! "${skip_eval}"; then
                 _ex_opts+="--data_path_and_name_and_type ${_data}/utt2lid,lids,text_int "
             fi
 
-
             # 0. Copy feats_type
             cp "${_data}/feats_type" "${_dir}/feats_type"
 
             # 1. Split the key file
             key_file=${_data}/text
             split_scps=""
-            _nj=$(min "${inference_nj}" "$(<${key_file} wc -l)")
+            _nj=$(min "${inference_nj}" "$(wc <${key_file} -l)")
             for n in $(seq "${_nj}"); do
                 split_scps+=" ${_logdir}/keys.${n}.scp"
             done
@@ -1020,6 +1020,7 @@ if ! "${skip_eval}"; then
                     --train_config "${svs_exp}"/config.yaml \
                     --output_dir "${_logdir}"/output.JOB \
                     --vocoder_checkpoint "${vocoder_file}" \
+                    --svs_task "${svs_task}" \
                     ${_opts} ${_ex_opts} ${inference_args}
 
             # 4. Concatenates the output files from each jobs
@@ -1035,8 +1036,12 @@ if ! "${skip_eval}"; then
             fi
 
             for i in $(seq "${_nj}"); do
-                 cat "${_logdir}/output.${i}/speech_shape/speech_shape"
+                cat "${_logdir}/output.${i}/speech_shape/speech_shape"
             done | LC_ALL=C sort -k1 > "${_dir}/speech_shape"
+            for i in $(seq "${_nj}"); do
+                cat "${_logdir}/output.${i}/wav/wav.scp" | \
+                sed 's|/log/output\.[0-9]*\/wav/|/wav/|'
+            done | LC_ALL=C sort -k1 > "${_dir}/wav/wav.scp"
             for i in $(seq "${_nj}"); do
                 mv -u "${_logdir}/output.${i}"/wav/*.wav "${_dir}"/wav
                 rm -rf "${_logdir}/output.${i}"/wav
@@ -1044,10 +1049,10 @@ if ! "${skip_eval}"; then
             if [ -e "${_logdir}/output.${_nj}/att_ws" ]; then
                 mkdir -p "${_dir}"/att_ws
                 for i in $(seq "${_nj}"); do
-                     cat "${_logdir}/output.${i}/durations/durations"
+                    cat "${_logdir}/output.${i}/durations/durations"
                 done | LC_ALL=C sort -k1 > "${_dir}/durations"
                 for i in $(seq "${_nj}"); do
-                     cat "${_logdir}/output.${i}/focus_rates/focus_rates"
+                    cat "${_logdir}/output.${i}/focus_rates/focus_rates"
                 done | LC_ALL=C sort -k1 > "${_dir}/focus_rates"
                 for i in $(seq "${_nj}"); do
                     mv -u "${_logdir}/output.${i}"/att_ws/*.png "${_dir}"/att_ws
@@ -1065,49 +1070,126 @@ if ! "${skip_eval}"; then
     fi
 
     if [ ${stage} -le 8 ] && [ ${stop_stage} -ge 8 ]; then
-        log "Stage 8: Scoring"
+        log "Stage 8: Scoring: SVS scoring"
 
+        if ! "${skip_versa}"; then
+            log "Scoring SVS evaluation via VERSA, using default ${versa_config}. \
+You can visit https://github.com/shinjiwlab/versa?tab=readme-ov-file#list-of-metrics \
+for more supported metrics."
+
+            for dset in ${test_sets}; do
+                _data="${data_feats}/${dset}"
+                _dir="${svs_exp}/${inference_tag}/${dset}"
+                _score_config=${versa_config}
+
+                _gt_wavscp="${_data}/wav.scp"
+                _gen_wavscp="${_dir}/wav/wav.scp"
+
+                _eval_dir=${_dir}/scoring/versa_eval
+                mkdir -p ${_eval_dir}
+                _opts=
+
+                _nj=$(( inference_nj < $(wc -l < "${_gen_wavscp}") ? inference_nj : $(wc -l < "${_gen_wavscp}") ))
+
+                _split_files=""
+                for n in $(seq ${_nj}); do
+                    _split_files+="${_eval_dir}/pred.${n} "
+                done
+                utils/split_scp.pl ${_gen_wavscp} ${_split_files}
+
+                if [ -n "${_gt_wavscp}" ]; then
+                    _split_files=""
+                    for n in $(seq ${_nj}); do
+                        _split_files+="${_eval_dir}/gt.${n} "
+                    done
+                    utils/split_scp.pl ${_gt_wavscp} ${_split_files}
+                    _opts+="--gt ${_eval_dir}/gt.JOB"
+                fi
+
+                if ${gpu_inference}; then
+                    _cmd="${cuda_cmd}"
+                    _ngpu=1
+                else
+                    _cmd="${decode_cmd}"
+                    _ngpu=0
+                fi
+
+                ${_cmd} --gpu "${_ngpu}" JOB=1:"${_nj}" "${_eval_dir}"/versa_eval.JOB.log \
+                    python -m versa.bin.scorer \
+                        --pred ${_eval_dir}/pred.JOB \
+                        --score_config ${_score_config} \
+                        --gt ${_gt_wavscp} \
+                        --text ${_data}/text \
+                        --use_gpu ${gpu_inference} \
+                        --output_file ${_eval_dir}/result.JOB.txt \
+                        --io soundfile \
+                        ${_opts} 2>&1;
+
+                python pyscripts/utils/aggregate_eval.py \
+                    --logdir ${_eval_dir} \
+                    --scoredir ${_eval_dir} \
+                    --nj ${_nj}
+
+                _log_dir="${_eval_dir}"
+                _count=0
+                for f in "${_log_dir}"/result.*.txt; do
+                    if [ -f "$f" ]; then
+                        c=$(wc -l < "$f")
+                        _count=$(( _count + c ))
+                    fi
+                done
+                echo "sentences: ${_count}" >> "${_eval_dir}/avg_result.txt"
+                ./scripts/utils/show_tts_results.sh ${_dir}
+                log "Finished scoring evaluation, results are in ${_eval_dir}"
+            done
+        fi
+
+        log "Scoring SVS evaluation via singing metrics: token accuracy, semitone ACC, VUV error."
         for dset in ${test_sets}; do
             _data="${data_feats}/${dset}"
-            _gt_wavscp="${_data}/wav.scp"
             _dir="${svs_exp}/${inference_tag}/${dset}"
+
+            _gt_wavscp="${_data}/wav.scp"
+            _gen_wavscp="${_dir}/wav/wav.scp"
             _gen_wavdir="${_dir}/wav"
 
-            # Objective Evaluation - MCD
-            log "Begin Scoring for MCD metrics on ${dset}, results are written under ${_dir}/MCD_res"
+            _eval_dir=${_dir}/scoring/sing_metrics
 
-            mkdir -p "${_dir}/MCD_res"
-            ${python} pyscripts/utils/evaluate_mcd.py \
-                ${_gen_wavdir} \
-                ${_gt_wavscp} \
-                --outdir "${_dir}/MCD_res"
+            # Objective Evaluation - MCD
+            # log "Begin Scoring for MCD metrics on ${dset}, results are written under ${_eval_dir}/MCD_res"
+
+            # mkdir -p "${_eval_dir}/MCD_res"
+            # ${python} pyscripts/utils/evaluate_mcd.py \
+            #     ${_gen_wavdir} \
+            #     ${_gt_wavscp} \
+            #     --outdir "${_eval_dir}/MCD_res"
 
             # Objective Evaluation - log-F0 RMSE
-            log "Begin Scoring for F0 related metrics on ${dset}, results are written under ${_dir}/F0_res"
+            # log "Begin Scoring for F0 related metrics on ${dset}, results are written under ${_eval_dir}/F0_res"
 
-            mkdir -p "${_dir}/F0_res"
-            ${python} pyscripts/utils/evaluate_f0.py \
-                ${_gen_wavdir} \
-                ${_gt_wavscp} \
-                --outdir "${_dir}/F0_res"
+            # mkdir -p "${_eval_dir}/F0_res"
+            # ${python} pyscripts/utils/evaluate_f0.py \
+            #     ${_gen_wavdir} \
+            #     ${_gt_wavscp} \
+            #     --outdir "${_eval_dir}/F0_res"
 
             # Objective Evaluation - semitone ACC
-            log "Begin Scoring for SEMITONE related metrics on ${dset}, results are written under ${_dir}/SEMITONE_res"
+            log "Begin Scoring for SEMITONE related metrics on ${dset}, results are written under ${_eval_dir}/SEMITONE_res"
 
-            mkdir -p "${_dir}/SEMITONE_res"
+            mkdir -p "${_eval_dir}/SEMITONE_res"
             ${python} pyscripts/utils/evaluate_semitone.py \
                 ${_gen_wavdir} \
                 ${_gt_wavscp} \
-                --outdir "${_dir}/SEMITONE_res"
+                --outdir "${_eval_dir}/SEMITONE_res"
 
-             # Objective Evaluation - VUV error
-            log "Begin Scoring for VUV related metrics on ${dset}, results are written under ${_dir}/VUV_res"
+            #  Objective Evaluation - VUV error
+            log "Begin Scoring for VUV related metrics on ${dset}, results are written under ${_eval_dir}/VUV_res"
 
-            mkdir -p "${_dir}/VUV_res"
+            mkdir -p "${_eval_dir}/VUV_res"
             ${python} pyscripts/utils/evaluate_vuv.py \
                 ${_gen_wavdir} \
                 ${_gt_wavscp} \
-                --outdir "${_dir}/VUV_res"
+                --outdir "${_eval_dir}/VUV_res"
 
         done
     fi
@@ -1116,107 +1198,58 @@ else
 fi
 
 packed_model="${svs_exp}/${svs_exp##*/}_${inference_model%.*}.zip"
-if [ ${stage} -le 9 ] && [ ${stop_stage} -ge 9 ]; then
-    log "Stage 9: Pack model: ${packed_model}"
+if ! "${skip_packing}"; then
+    if [ ${stage} -le 9 ] && [ ${stop_stage} -ge 9 ]; then
+        log "Stage 9: Pack model: ${packed_model}"
 
-    _opts=""
-    if [ -e "${svs_stats_dir}/train/feats_stats.npz" ]; then
-        _opts+=" --option ${svs_stats_dir}/train/feats_stats.npz"
-    fi
-    if [ -e "${svs_stats_dir}/train/pitch_stats.npz" ]; then
-        _opts+=" --option ${svs_stats_dir}/train/pitch_stats.npz"
-    fi
-    if [ -e "${svs_stats_dir}/train/energy_stats.npz" ]; then
-        _opts+=" --option ${svs_stats_dir}/train/energy_stats.npz"
-    fi
-    if "${use_xvector}"; then
-        for dset in "${train_set}" ${test_sets}; do
-            _opts+=" --option ${dumpdir}/xvector/${dset}/spk_xvector.scp"
-            _opts+=" --option ${dumpdir}/xvector/${dset}/spk_xvector.ark"
-        done
-    fi
-    if "${use_sid}"; then
-        _opts+=" --option ${data_feats}/org/${train_set}/spk2sid"
-    fi
-    if "${use_lid}"; then
-        _opts+=" --option ${data_feats}/org/${train_set}/lang2lid"
-    fi
-    ${python} -m espnet2.bin.pack svs \
-        --train_config "${svs_exp}"/config.yaml \
-        --model_file "${svs_exp}"/"${inference_model}" \
-        --option "${svs_exp}"/images  \
-        --outpath "${packed_model}" \
-        ${_opts}
-
-    # NOTE(kamo): If you'll use packed model to inference in this script, do as follows
-    #   % unzip ${packed_model}
-    #   % ./run.sh --stage 9 --svs_exp $(basename ${packed_model} .zip) --inference_model pretrain.pth
-fi
-
-if ! "${skip_upload}"; then
-    if [ ${stage} -le 10 ] && [ ${stop_stage} -ge 10 ]; then
-        log "Stage 10: Upload model to Zenodo: ${packed_model}"
-
-        # To upload your model, you need to do:
-        #   1. Signup to Zenodo: https://zenodo.org/
-        #   2. Create access token: https://zenodo.org/account/settings/applications/tokens/new/
-        #   3. Set your environment: % export ACCESS_TOKEN="<your token>"
-
-        if command -v git &> /dev/null; then
-            _creator_name="$(git config user.name)"
-            _checkout="
-git checkout $(git show -s --format=%H)"
-        else
-            _creator_name="$(whoami)"
-            _checkout=""
+        _opts=""
+        if [ -e "${svs_stats_dir}/train/feats_stats.npz" ]; then
+            _opts+=" --option ${svs_stats_dir}/train/feats_stats.npz"
         fi
-        # /some/where/espnet/egs2/foo/svs1/ -> foo/svs1
-        _task="$(pwd | rev | cut -d/ -f1-2 | rev)"
-        # foo/svs1 -> foo
-        _corpus="${_task%/*}"
-        _model_name="${_creator_name}/${_corpus}_$(basename ${packed_model} .zip)"
+        if [ -e "${svs_stats_dir}/train/pitch_stats.npz" ]; then
+            _opts+=" --option ${svs_stats_dir}/train/pitch_stats.npz"
+        fi
+        if [ -e "${svs_stats_dir}/train/energy_stats.npz" ]; then
+            _opts+=" --option ${svs_stats_dir}/train/energy_stats.npz"
+        fi
+        if "${use_xvector}"; then
+            for dset in "${train_set}" ${test_sets}; do
+                _opts+=" --option ${dumpdir}/xvector/${dset}/spk_xvector.scp"
+                _opts+=" --option ${dumpdir}/xvector/${dset}/spk_xvector.ark"
+            done
+        fi
+        if "${use_sid}"; then
+            _opts+=" --option ${data_feats}/org/${train_set}/spk2sid"
+        fi
+        if "${use_lid}"; then
+            _opts+=" --option ${data_feats}/org/${train_set}/lang2lid"
+        fi
+        ${python} -m espnet2.bin.pack svs \
+            --train_config "${svs_exp}"/config.yaml \
+            --model_file "${svs_exp}"/"${inference_model}" \
+            --option "${svs_exp}"/images \
+            --outpath "${packed_model}" \
+            ${_opts}
 
-        # Generate description file
-        cat << EOF > "${svs_exp}"/description
-This model was trained by ${_creator_name} using ${_task} recipe in <a href="https://github.com/espnet/espnet/">espnet</a>.
-<p>&nbsp;</p>
-<ul>
-<li><strong>Python API</strong><pre><code class="language-python">See https://github.com/espnet/espnet_model_zoo</code></pre></li>
-<li><strong>Evaluate in the recipe</strong><pre>
-<code class="language-bash">git clone https://github.com/espnet/espnet
-cd espnet${_checkout}
-pip install -e .
-cd $(pwd | rev | cut -d/ -f1-3 | rev)
-# Download the model file here
-./run.sh --skip_data_prep false --skip_train true --download_model ${_model_name}</code>
-</pre></li>
-<li><strong>Config</strong><pre><code>$(cat "${svs_exp}"/config.yaml)</code></pre></li>
-</ul>
-EOF
-
-        # NOTE(kamo): The model file is uploaded here, but not published yet.
-        #   Please confirm your record at Zenodo and publish by yourself.
-
-        # shellcheck disable=SC2086
-        espnet_model_zoo_upload \
-            --file "${packed_model}" \
-            --title "ESPnet2 pretrained model, ${_model_name}, fs=${fs}, lang=${lang}" \
-            --description_file "${svs_exp}"/description \
-            --creator_name "${_creator_name}" \
-            --license "CC-BY-4.0" \
-            --use_sandbox false \
-            --publish false
+        # NOTE(kamo): If you'll use packed model to inference in this script, do as follows
+        #   % unzip ${packed_model}
+        #   % ./run.sh --stage 9 --svs_exp $(basename ${packed_model} .zip) --inference_model pretrain.pth
     fi
 else
-    log "Skip the uploading stage"
+    log "Skip the packing stage"
 fi
 
 if ! "${skip_upload_hf}"; then
-    if [ ${stage} -le 11 ] && [ ${stop_stage} -ge 11 ]; then
+    if [ ${stage} -le 10 ] && [ ${stop_stage} -ge 10 ]; then
         [ -z "${hf_repo}" ] && \
             log "ERROR: You need to setup the variable hf_repo with the name of the repository located at HuggingFace" && \
             exit 1
-        log "Stage 11: Upload model to HuggingFace: ${hf_repo}"
+        log "Stage 10: Upload model to HuggingFace: ${hf_repo}"
+
+        if [ ! -f "${packed_model}" ]; then
+            log "ERROR: ${packed_model} does not exist. Please run stage 9 first."
+            exit 1
+        fi
 
         gitlfs=$(git lfs --version 2> /dev/null || true)
         [ -z "${gitlfs}" ] && \

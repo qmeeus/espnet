@@ -55,7 +55,7 @@ class STFTDecoder(AbsDecoder):
         # the exponent factor used in the "exponent" transform
         self.spec_abs_exponent = spec_abs_exponent
 
-    @torch.cuda.amp.autocast(enabled=False)
+    @torch.amp.autocast("cuda", enabled=False)
     def forward(self, input: ComplexTensor, ilens: torch.Tensor, fs: int = None):
         """Forward.
 
@@ -110,12 +110,12 @@ class STFTDecoder(AbsDecoder):
 
     def _reconfig_for_fs(self, fs):
         """Reconfigure iSTFT window and hop lengths for a new sampling rate
+
         while keeping their duration fixed.
 
         Args:
             fs (int): new sampling rate
-        """  # noqa: H405
-        assert fs % self.default_fs == 0 or self.default_fs % fs == 0
+        """
         self.stft.n_fft = self.n_fft * fs // self.default_fs
         self.stft.win_length = self.win_length * fs // self.default_fs
         self.stft.hop_length = self.hop_length * fs // self.default_fs
@@ -124,7 +124,7 @@ class STFTDecoder(AbsDecoder):
         window_func = getattr(torch, f"{self.window}_window")
         window = window_func(self.win_length)
         n_pad_left = (self.n_fft - window.shape[0]) // 2
-        n_pad_right = self.n_fft - window.shape[0] - n_pad_left
+        n_pad_right = self.n_fft - window.shape[0] - n_pad_left  # noqa
         return window
 
     def spec_back(self, spec):

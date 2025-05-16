@@ -6,9 +6,10 @@ import logging
 import math
 
 import torch
-from typeguard import check_argument_types
+from typeguard import typechecked
 
 
+@typechecked
 def initialize(model: torch.nn.Module, init: str):
     """Initialize weights of a neural network module.
 
@@ -21,7 +22,6 @@ def initialize(model: torch.nn.Module, init: str):
         model: Target.
         init: Method of initialization.
     """
-    assert check_argument_types()
 
     if init == "chainer":
         # 1. lecun_normal_init_parameters
@@ -79,6 +79,8 @@ def initialize(model: torch.nn.Module, init: str):
                     torch.nn.init.kaiming_uniform_(p.data, nonlinearity="relu")
                 elif init == "kaiming_normal":
                     torch.nn.init.kaiming_normal_(p.data, nonlinearity="relu")
+                elif init == "normal":
+                    torch.nn.init.normal_(p.data, mean=0.0, std=0.02)
                 else:
                     raise ValueError("Unknown initialization: " + init)
         # bias init
